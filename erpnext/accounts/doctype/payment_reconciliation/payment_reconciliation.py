@@ -292,6 +292,7 @@ class PaymentReconciliation(Document):
 		if get_invoices:
 			condition += " and posting_date >= {0}".format(frappe.db.escape(self.from_invoice_date)) if self.from_invoice_date else ""
 			condition += " and posting_date <= {0}".format(frappe.db.escape(self.to_invoice_date)) if self.to_invoice_date else ""
+			condition += " and project = {0}".format(frappe.db.escape(self.project)) if self.project else ""
 			dr_or_cr = ("debit_in_account_currency" if erpnext.get_party_account_type(self.party_type) == 'Receivable'
 				else "credit_in_account_currency")
 
@@ -304,6 +305,7 @@ class PaymentReconciliation(Document):
 			condition = " and doc.company = '{0}' ".format(self.company)
 			condition += " and doc.posting_date >= {0}".format(frappe.db.escape(self.from_payment_date)) if self.from_payment_date else ""
 			condition += " and doc.posting_date <= {0}".format(frappe.db.escape(self.to_payment_date)) if self.to_payment_date else ""
+			condition += " and doc.project = {0}".format(frappe.db.escape(self.project)) if self.project else ""
 			dr_or_cr = ("gl.debit_in_account_currency" if erpnext.get_party_account_type(self.party_type) == 'Receivable'
 				else "gl.credit_in_account_currency")
 
@@ -315,6 +317,7 @@ class PaymentReconciliation(Document):
 		else:
 			condition += " and posting_date >= {0}".format(frappe.db.escape(self.from_payment_date)) if self.from_payment_date else ""
 			condition += " and posting_date <= {0}".format(frappe.db.escape(self.to_payment_date)) if self.to_payment_date else ""
+			condition += " and project = {0}".format(frappe.db.escape(self.project)) if self.project else ""
 
 			if self.minimum_payment_amount:
 				condition += " and unallocated_amount >= {0}".format(flt(self.minimum_payment_amount)) if get_payments \

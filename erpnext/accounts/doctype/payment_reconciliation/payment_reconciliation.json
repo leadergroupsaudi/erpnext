@@ -24,6 +24,7 @@
   "invoice_limit",
   "payment_limit",
   "bank_cash_account",
+  "project",
   "sec_break1",
   "invoices",
   "column_break_15",
@@ -178,6 +179,13 @@
   {
    "fieldname": "column_break_11",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Project",
+   "options": "Project"
   }
  ],
  "hide_toolbar": 1,
