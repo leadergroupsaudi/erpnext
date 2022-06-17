@@ -103,7 +103,7 @@ def get_item_details(args, doc=None, for_validate=False, overwrite_warehouse=Tru
 
 	data = get_pricing_rule_for_item(args, out.price_list_rate,
 		doc, for_validate=for_validate)
-
+	
 	out.update(data)
 
 	update_stock(args, out)
@@ -1077,6 +1077,7 @@ def apply_price_list(args, as_doc=False):
 
 		for item in item_list:
 			args_copy = frappe._dict(args.copy())
+		
 			args_copy.update(item)
 			item_details = apply_price_list_on_item(args_copy)
 			children.append(item_details)
@@ -1103,7 +1104,10 @@ def apply_price_list_on_item(args):
 	item_details = get_price_list_rate(args, item_doc)
 
 	item_details.update(get_pricing_rule_for_item(args, item_details.price_list_rate))
-
+	#update discount
+	if item_details.discount_percentage and item_details.discount_percentage > 0 :
+		dicount_amount_temp= flt(item_details.get("price_list_rate")) *  (item_details.discount_percentage/100)
+		item_details.price_list_rate = item_details.price_list_rate - dicount_amount_temp
 	return item_details
 
 def get_price_list_currency_and_exchange_rate(args):
