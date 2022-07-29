@@ -143,7 +143,7 @@ def get_vat_amount(doc):
 
 	for tax in doc.get('taxes'):
 		if tax.account_head in vat_accounts:
-			vat_amount += tax.tax_amount
+			vat_amount += tax.tax_amount_after_discount_amount
 
 	return vat_amount
 
