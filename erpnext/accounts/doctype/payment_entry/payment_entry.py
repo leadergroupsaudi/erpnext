@@ -1254,6 +1254,9 @@ def get_outstanding_reference_documents(args):
 	# Add cost center condition
 	if args.get("cost_center"):
 		condition += " and cost_center='%s'" % args.get("cost_center")
+	# Add project condition
+	if args.get("project"):
+		condition += " and project='%s'" % args.get("project")
 
 	date_fields_dict = {
 		"posting_date": ["from_posting_date", "to_posting_date"],

@@ -1288,7 +1288,10 @@ def apply_price_list_on_item(args):
 	item_details = get_price_list_rate(args, item_doc)
 
 	item_details.update(get_pricing_rule_for_item(args, item_details.price_list_rate))
-
+	#update discount
+	if item_details.discount_percentage and item_details.discount_percentage > 0 :
+		dicount_amount_temp= flt(item_details.get("price_list_rate")) *  (item_details.discount_percentage/100)
+		item_details.price_list_rate = item_details.price_list_rate - dicount_amount_temp
 	return item_details
 
 
