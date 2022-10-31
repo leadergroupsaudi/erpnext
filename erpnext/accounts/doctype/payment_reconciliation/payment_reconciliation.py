@@ -371,6 +371,7 @@ class PaymentReconciliation(Document):
 				if self.to_invoice_date
 				else ""
 			)
+			condition += " and project = {0}".format(frappe.db.escape(self.project)) if self.project else ""
 			dr_or_cr = (
 				"debit_in_account_currency"
 				if erpnext.get_party_account_type(self.party_type) == "Receivable"
@@ -398,6 +399,7 @@ class PaymentReconciliation(Document):
 				if self.to_payment_date
 				else ""
 			)
+			condition += " and project = {0}".format(frappe.db.escape(self.project)) if self.project else ""
 			dr_or_cr = (
 				"debit_in_account_currency"
 				if erpnext.get_party_account_type(self.party_type) == "Receivable"
@@ -424,6 +426,7 @@ class PaymentReconciliation(Document):
 				if self.to_payment_date
 				else ""
 			)
+			condition += " and project = {0}".format(frappe.db.escape(self.project)) if self.project else ""
 
 			if self.minimum_payment_amount:
 				condition += (

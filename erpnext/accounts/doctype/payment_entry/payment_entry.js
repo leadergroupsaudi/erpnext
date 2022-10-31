@@ -651,6 +651,13 @@ frappe.ui.form.on('Payment Entry', {
 				}
 			},
 			{fieldtype:"Column Break"},
+			{fieldtype:"Link", label:__("Project"), fieldname:"project", options:"Project",
+				"get_query": function() {
+					return {
+						"filters": {"company": frm.doc.company}
+					}
+				}
+			},
 			{fieldtype:"Section Break"},
 			{fieldtype:"Check", label: __("Allocate Payment Amount"), fieldname:"allocate_payment_amount", default:1},
 		];
@@ -659,6 +666,7 @@ frappe.ui.form.on('Payment Entry', {
 			frappe.flags.allocate_payment_amount = true;
 			frm.events.validate_filters_data(frm, filters);
 			frm.doc.cost_center = filters.cost_center;
+			frm.doc.project = filters.project;
 			frm.events.get_outstanding_documents(frm, filters);
 		}, __("Filters"), __("Get Outstanding Documents"));
 	},
@@ -703,7 +711,8 @@ frappe.ui.form.on('Payment Entry', {
 			"payment_type": frm.doc.payment_type,
 			"party": frm.doc.party,
 			"party_account": frm.doc.payment_type=="Receive" ? frm.doc.paid_from : frm.doc.paid_to,
-			"cost_center": frm.doc.cost_center
+			"cost_center": frm.doc.cost_center,
+			"project": frm.doc.project
 		}
 
 		for (let key in filters) {
