@@ -30,6 +30,8 @@
   "progress",
   "duration",
   "is_milestone",
+  "locations_section",
+  "locations",
   "sb_details",
   "description",
   "sb_depends_on",
@@ -390,6 +392,17 @@
    "fieldtype": "Date",
    "label": "Completed On",
    "mandatory_depends_on": "eval: doc.status == \"Completed\""
+  },
+  {
+   "fieldname": "locations_section",
+   "fieldtype": "Section Break",
+   "label": "Locations"
+  },
+  {
+   "fieldname": "locations",
+   "fieldtype": "Table",
+   "label": "Locations",
+   "options": "Locations"
   }
  ],
  "icon": "fa fa-check",
@@ -397,7 +410,7 @@
  "is_tree": 1,
  "links": [],
  "max_attachments": 5,
- "modified": "2021-04-16 12:46:51.556741",
+ "modified": "2022-11-25 08:51:36.726836",
  "modified_by": "Administrator",
  "module": "Projects",
  "name": "Task",
