@@ -36,7 +36,9 @@
   "remind_before",
   "column_break_4",
   "send_interview_feedback_reminder",
-  "feedback_reminder_notification_template"
+  "feedback_reminder_notification_template",
+  "virtual_attendance_section",
+  "enable_virtual_attendance"
  ],
  "fields": [
   {
@@ -226,13 +228,24 @@
    "fieldname": "check_vacancies",
    "fieldtype": "Check",
    "label": "Check Vacancies On Job Offer Creation"
+  },
+  {
+   "fieldname": "virtual_attendance_section",
+   "fieldtype": "Section Break",
+   "label": "Virtual Attendance"
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_virtual_attendance",
+   "fieldtype": "Check",
+   "label": "Enable Virtual Attendance"
   }
  ],
  "icon": "fa fa-cog",
  "idx": 1,
  "issingle": 1,
  "links": [],
- "modified": "2021-10-01 23:46:11.098236",
+ "modified": "2023-01-12 09:18:26.065258",
  "modified_by": "Administrator",
  "module": "HR",
  "name": "HR Settings",
