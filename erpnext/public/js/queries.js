@@ -127,20 +127,21 @@ $.extend(erpnext.queries, {
 
 	get_filtered_dimensions: function(doc, child_fields, dimension, company) {
 		let account = '';
-
 		child_fields.forEach((field) => {
 			if (!account) {
 				account = doc[field];
 			}
 		});
-
+		let filter = {	'dimension': dimension,
+						'account': account,
+						'company': company
+					}
+		if (dimension == 'project'){
+			filter['status'] = ["=", ["Open", "In Progress"]]
+		}
 		return {
 			query: "erpnext.controllers.queries.get_filtered_dimensions",
-			filters: {
-				'dimension': dimension,
-				'account': account,
-				'company': company
-			}
+			filters: filter
 		};
 	}
 });
