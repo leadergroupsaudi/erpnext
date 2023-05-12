@@ -24,7 +24,7 @@ class AttendanceRequest(Document):
 
 	def on_cancel(self):
 		attendance_list = frappe.get_list(
-			"Attendance", {"employee": self.employee, "attendance_request": self.name}
+			"Attendance", {"employee": self.employee, "attendance_request": self.name,'docstatus':1}
 		)
 		if attendance_list:
 			for attendance in attendance_list:
