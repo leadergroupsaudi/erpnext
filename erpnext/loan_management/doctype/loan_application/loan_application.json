@@ -104,7 +104,9 @@
    "fieldtype": "Currency",
    "in_list_view": 1,
    "label": "Loan Amount",
-   "options": "Company:company:default_currency"
+   "non_negative": 1,
+   "options": "Company:company:default_currency",
+   "reqd": 1
   },
   {
    "fieldname": "column_break_7",
@@ -215,7 +217,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2021-04-19 18:24:40.119647",
+ "modified": "2023-05-31 13:55:26.544399",
  "modified_by": "Administrator",
  "module": "Loan Management",
  "name": "Loan Application",
