@@ -37,7 +37,7 @@ def get_site_info(site_info):
 	if company:
 		domain = frappe.get_cached_value("Company", cstr(company), "domain")
 
-	return {"company": company, "domain": domain, "activation": get_level()}
+	return {"company": company, "domain": domain, "activation": get_level(site_info)}
 
 
 @contextmanager
@@ -47,7 +47,11 @@ def payment_app_import_guard():
 	msg = _("payments app is not installed. Please install it from {} or {}").format(
 		marketplace_link, github_link
 	)
+
+	if "payments" not in frappe.get_installed_apps():
+		frappe.throw(msg, title=_("Missing Payments App"), exc=frappe.AppNotInstalledError)
+
 	try:
 		yield
 	except ImportError:
-		frappe.throw(msg, title=_("Missing Payments App"))
+		frappe.throw(msg, title=_("Missing Payments App"), exc=frappe.AppNotInstalledError)

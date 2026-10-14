@@ -109,11 +109,16 @@ erpnext.sales_common = {
 				);
 
 				this.toggle_editable_price_list_rate();
+				this.change_warehouse_labels_for_return();
 			}
 
 			company() {
 				super.company();
 				this.set_default_company_address();
+				if (!this.is_onload) {
+					// we don't want to override the mapped contact from prevdoc
+					this.set_default_company_contact_person();
+				}
 			}
 
 			set_default_company_address() {
@@ -135,6 +140,24 @@ erpnext.sales_common = {
 							}
 						},
 					});
+				}
+			}
+
+			set_default_company_contact_person() {
+				if (!frappe.meta.has_field(this.frm.doc.doctype, "company_contact_person")) {
+					return;
+				}
+
+				if (this.frm.doc.company) {
+					frappe.db
+						.get_value("Company", this.frm.doc.company, "default_sales_contact")
+						.then((r) => {
+							if (r.message?.default_sales_contact) {
+								this.frm.set_value("company_contact_person", r.message.default_sales_contact);
+							} else {
+								this.frm.set_value("company_contact_person", "");
+							}
+						});
 				}
 			}
 
@@ -257,19 +280,17 @@ erpnext.sales_common = {
 
 			set_actual_qty(doc, cdt, cdn) {
 				let row = locals[cdt][cdn];
-				let sales_doctypes = ["Sales Invoice", "Delivery Note", "Sales Order"];
+				let sales_doctypes = ["Sales Invoice", "Delivery Note", "Sales Order", "Quotation"];
 
 				if (row.item_code && row.warehouse && sales_doctypes.includes(doc.doctype)) {
-					frappe.call({
+					return this.frm.call({
 						method: "erpnext.stock.get_item_details.get_bin_details",
+						child: row,
 						args: {
 							item_code: row.item_code,
 							warehouse: row.warehouse,
-						},
-						callback(r) {
-							if (r.message) {
-								frappe.model.set_value(cdt, cdn, "actual_qty", r.message.actual_qty);
-							}
+							company: doc.company,
+							include_child_warehouses: true,
 						},
 					});
 				}
@@ -465,7 +486,30 @@ erpnext.sales_common = {
 				}
 			}
 
-			project() {
+			project(doc, cdt, cdn) {
+				if (!cdt || !cdn) {
+					if (this.frm.doc.project) {
+						$.each(this.frm.doc["items"] || [], function (i, item) {
+							if (!item.project) {
+								frappe.model.set_value(item.doctype, item.name, "project", doc.project);
+							}
+						});
+					}
+				} else {
+					const item = frappe.get_doc(cdt, cdn);
+					if (item.project) {
+						$.each(this.frm.doc["items"] || [], function (i, other_item) {
+							if (!other_item.project) {
+								frappe.model.set_value(
+									other_item.doctype,
+									other_item.name,
+									"project",
+									item.project
+								);
+							}
+						});
+					}
+				}
 				let me = this;
 				if (["Delivery Note", "Sales Invoice", "Sales Order"].includes(this.frm.doc.doctype)) {
 					if (this.frm.doc.project) {
@@ -499,6 +543,33 @@ erpnext.sales_common = {
 			coupon_code() {
 				this.frm.set_value("discount_amount", 0);
 				this.frm.set_value("additional_discount_percentage", 0);
+			}
+
+			is_return() {
+				let reset = !this.frm.doc.is_return;
+				this.change_warehouse_labels_for_return(reset);
+			}
+
+			change_warehouse_labels_for_return(reset) {
+				// swap source and target warehouse labels for return
+				let source_warehouse_label = __("Source Warehouse");
+				let target_warehouse_label = __("Set Target Warehouse");
+
+				if (this.frm.doc.doctype == "Delivery Note") {
+					source_warehouse_label = __("Set Source Warehouse");
+				}
+
+				if (reset) {
+					// reset to original labels
+					this.frm.set_df_property("set_warehouse", "label", source_warehouse_label);
+					this.frm.set_df_property("set_target_warehouse", "label", target_warehouse_label);
+					return;
+				}
+
+				if (this.frm.doc.is_return) {
+					this.frm.set_df_property("set_warehouse", "label", target_warehouse_label);
+					this.frm.set_df_property("set_target_warehouse", "label", source_warehouse_label);
+				}
 			}
 		};
 	},

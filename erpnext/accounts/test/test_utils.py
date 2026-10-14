@@ -7,8 +7,10 @@ from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_ent
 from erpnext.accounts.doctype.purchase_invoice.test_purchase_invoice import make_purchase_invoice
 from erpnext.accounts.party import get_party_shipping_address
 from erpnext.accounts.utils import (
+	get_currency_precision,
 	get_future_stock_vouchers,
 	get_voucherwise_gl_entries,
+	get_zero_cutoff,
 	sort_stock_vouchers_by_posting_date,
 )
 from erpnext.stock.doctype.item.test_item import make_item
@@ -88,6 +90,8 @@ class TestUtils(unittest.TestCase):
 		purchase_invoice.submit()
 
 		payment_entry = get_payment_entry(purchase_invoice.doctype, purchase_invoice.name)
+		payment_entry.target_exchange_rate = 82.32
+		payment_entry.set_amounts()
 		payment_entry.paid_amount = 15725
 		payment_entry.deductions = []
 		payment_entry.save()
@@ -155,6 +159,26 @@ class TestUtils(unittest.TestCase):
 		self.assertEqual(len(doc_name), 3)
 		self.assertSequenceEqual(doc_name[0:2], ("SUP", fiscal_year))
 		frappe.db.set_default("supp_master_name", "Supplier Name")
+
+	def test_get_zero_cutoff(self):
+		self.assertEqual(get_zero_cutoff(None), 0.005)
+		self.assertEqual(get_zero_cutoff("EUR"), 0.005)
+		self.assertEqual(get_zero_cutoff("BHD"), 0.0005)
+
+	def test_get_currency_precision_respects_zero_and_fallback(self):
+		currency_precision = frappe.db.get_default("currency_precision")
+		number_format = frappe.db.get_default("number_format")
+
+		try:
+			frappe.db.set_default("number_format", "#,###.##")
+			frappe.db.set_default("currency_precision", "0")
+			self.assertEqual(get_currency_precision(), 0)
+
+			frappe.db.set_default("currency_precision", "")
+			self.assertEqual(get_currency_precision(), 2)
+		finally:
+			frappe.db.set_default("currency_precision", currency_precision or "")
+			frappe.db.set_default("number_format", number_format or "#,###.##")
 
 
 ADDRESS_RECORDS = [

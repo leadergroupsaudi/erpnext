@@ -81,7 +81,7 @@ def post_depreciation_entries(date=None):
 			)
 
 		try:
-			make_depreciation_entry(
+			_make_depreciation_entry(
 				asset_depr_schedule_name,
 				date,
 				sch_start_idx,
@@ -139,7 +139,7 @@ def get_depreciable_asset_depr_schedules_data(date):
 def make_depreciation_entry_for_all_asset_depr_schedules(asset_doc, date=None):
 	for row in asset_doc.get("finance_books"):
 		asset_depr_schedule_name = get_asset_depr_schedule_name(asset_doc.name, "Active", row.finance_book)
-		make_depreciation_entry(asset_depr_schedule_name, date)
+		_make_depreciation_entry(asset_depr_schedule_name, date)
 
 
 def get_acc_frozen_upto():
@@ -186,6 +186,30 @@ def get_depreciation_cost_center_and_depreciation_series_for_company():
 
 @frappe.whitelist()
 def make_depreciation_entry(
+	asset_depr_schedule_name,
+	date=None,
+	sch_start_idx=None,
+	sch_end_idx=None,
+	credit_and_debit_accounts=None,
+	depreciation_cost_center_and_depreciation_series=None,
+	accounting_dimensions=None,
+):
+	asset_depr_schedule_doc = frappe.get_doc("Asset Depreciation Schedule", asset_depr_schedule_name)
+	frappe.has_permission("Asset Depreciation Schedule", "write", asset_depr_schedule_doc, throw=True)
+	frappe.has_permission("Asset", "write", asset_depr_schedule_doc.asset, throw=True)
+
+	return _make_depreciation_entry(
+		asset_depr_schedule_name,
+		date,
+		sch_start_idx,
+		sch_end_idx,
+		credit_and_debit_accounts,
+		depreciation_cost_center_and_depreciation_series,
+		accounting_dimensions,
+	)
+
+
+def _make_depreciation_entry(
 	asset_depr_schedule_name,
 	date=None,
 	sch_start_idx=None,
@@ -277,7 +301,9 @@ def _make_journal_entry_for_depreciation(
 	je.posting_date = depr_schedule.schedule_date
 	je.company = asset.company
 	je.finance_book = asset_depr_schedule_doc.finance_book
-	je.remark = f"Depreciation Entry against {asset.name} worth {depr_schedule.depreciation_amount}"
+	je.remark = _("Depreciation Entry against {0} worth {1}").format(
+		asset.name, depr_schedule.depreciation_amount
+	)
 
 	credit_entry = {
 		"account": credit_account,
@@ -392,7 +418,8 @@ def get_comma_separated_links(names, doctype):
 
 
 @frappe.whitelist()
-def scrap_asset(asset_name):
+def scrap_asset(asset_name, scrap_date=None):
+	frappe.has_permission("Asset", "write", asset_name, throw=True)
 	asset = frappe.get_doc("Asset", asset_name)
 
 	if asset.docstatus != 1:
@@ -400,7 +427,11 @@ def scrap_asset(asset_name):
 	elif asset.status in ("Cancelled", "Sold", "Scrapped", "Capitalized"):
 		frappe.throw(_("Asset {0} cannot be scrapped, as it is already {1}").format(asset.name, asset.status))
 
-	date = today()
+	today_date = getdate(today())
+	date = getdate(scrap_date) or today_date
+	purchase_date = getdate(asset.purchase_date)
+
+	validate_scrap_date(date, today_date, purchase_date, asset.calculate_depreciation, asset_name)
 
 	notes = _("This schedule was created when Asset {0} was scrapped.").format(
 		get_link_to_form(asset.doctype, asset.name)
@@ -434,8 +465,39 @@ def scrap_asset(asset_name):
 	frappe.msgprint(_("Asset scrapped via Journal Entry {0}").format(je.name))
 
 
+def validate_scrap_date(scrap_date, today_date, purchase_date, calculate_depreciation, asset_name):
+	if scrap_date > today_date:
+		frappe.throw(_("Future date is not allowed"))
+	elif scrap_date < purchase_date:
+		frappe.throw(_("Scrap date cannot be before purchase date"))
+
+	if calculate_depreciation:
+		asset_depreciation_schedules = frappe.db.get_all(
+			"Asset Depreciation Schedule", filters={"asset": asset_name, "docstatus": 1}, fields=["name"]
+		)
+
+		for depreciation_schedule in asset_depreciation_schedules:
+			last_booked_depreciation_date = frappe.db.get_value(
+				"Depreciation Schedule",
+				{
+					"parent": depreciation_schedule["name"],
+					"docstatus": 1,
+					"journal_entry": ["!=", ""],
+				},
+				"schedule_date",
+				order_by="schedule_date desc",
+			)
+			if (
+				last_booked_depreciation_date
+				and scrap_date < last_booked_depreciation_date
+				and scrap_date > purchase_date
+			):
+				frappe.throw(_("Asset cannot be scrapped before the last depreciation entry."))
+
+
 @frappe.whitelist()
 def restore_asset(asset_name):
+	frappe.has_permission("Asset", "write", asset_name, throw=True)
 	asset = frappe.get_doc("Asset", asset_name)
 
 	reverse_depreciation_entry_made_after_disposal(asset, asset.disposal_date)
@@ -471,7 +533,8 @@ def depreciate_asset(asset_doc, date, notes):
 	make_depreciation_entry_for_all_asset_depr_schedules(asset_doc, date)
 
 	asset_doc.reload()
-	cancel_depreciation_entries(asset_doc, date)
+	if not frappe.flags.is_composite_component:
+		cancel_depreciation_entries(asset_doc, date)
 
 
 @erpnext.allow_regional
@@ -500,6 +563,7 @@ def modify_depreciation_schedule_for_asset_repairs(asset, notes):
 	for repair in asset_repairs:
 		if repair.increase_in_asset_life:
 			asset_repair = frappe.get_doc("Asset Repair", repair.name)
+			asset_repair.asset_doc = asset
 			asset_repair.modify_depreciation_schedule()
 			make_new_active_asset_depr_schedules_and_cancel_current_ones(asset, notes)
 

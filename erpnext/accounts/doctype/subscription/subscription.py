@@ -26,6 +26,7 @@ from erpnext.accounts.doctype.accounting_dimension.accounting_dimension import (
 )
 from erpnext.accounts.doctype.subscription_plan.subscription_plan import get_plan_rate
 from erpnext.accounts.party import get_party_account_currency
+from erpnext.stock.doctype.item.item import get_item_defaults
 
 
 class InvoiceCancelled(frappe.ValidationError):
@@ -221,6 +222,9 @@ class Subscription(Document):
 		"""
 		Sets the status of the `Subscription`
 		"""
+		if self.status == "Cancelled":
+			return
+
 		if self.is_trialling():
 			self.status = "Trialling"
 		elif self.status == "Active" and self.end_date and getdate(posting_date) > getdate(self.end_date):
@@ -483,18 +487,23 @@ class Subscription(Document):
 
 		return invoice
 
-	def get_items_from_plans(self, plans: list[dict[str, str]], prorate: bool | None = None) -> list[dict]:
+	def get_items_from_plans(self, plans: list[dict[str, str]], prorate: int = 0) -> list[dict]:
 		"""
 		Returns the `Item`s linked to `Subscription Plan`
 		"""
-		if prorate is None:
-			prorate = False
 
+		prorate_factor = 1
 		if prorate:
 			prorate_factor = get_prorata_factor(
 				self.current_invoice_end,
 				self.current_invoice_start,
-				cint(self.generate_invoice_at == "Beginning of the current subscription period"),
+				cint(
+					self.generate_invoice_at
+					in [
+						"Beginning of the current subscription period",
+						"Days before the current subscription period",
+					]
+				),
 			)
 
 		items = []
@@ -511,33 +520,19 @@ class Subscription(Document):
 
 			deferred = frappe.db.get_value("Item", item_code, deferred_field)
 
-			if not prorate:
-				item = {
-					"item_code": item_code,
-					"qty": plan.qty,
-					"rate": get_plan_rate(
-						plan.plan,
-						plan.qty,
-						party,
-						self.current_invoice_start,
-						self.current_invoice_end,
-					),
-					"cost_center": plan_doc.cost_center,
-				}
-			else:
-				item = {
-					"item_code": item_code,
-					"qty": plan.qty,
-					"rate": get_plan_rate(
-						plan.plan,
-						plan.qty,
-						party,
-						self.current_invoice_start,
-						self.current_invoice_end,
-						prorate_factor,
-					),
-					"cost_center": plan_doc.cost_center,
-				}
+			item = {
+				"item_code": item_code,
+				"qty": plan.qty,
+				"rate": get_plan_rate(
+					plan.plan,
+					plan.qty,
+					party,
+					self.current_invoice_start,
+					self.current_invoice_end,
+					prorate_factor,
+				),
+				"cost_center": plan_doc.cost_center,
+			}
 
 			if deferred:
 				item.update(
@@ -566,6 +561,11 @@ class Subscription(Document):
 		1. `process_for_active`
 		2. `process_for_past_due`
 		"""
+		# Snapshot before update_subscription_period() below can roll this forward,
+		# so the cancel_at_period_end check further down still targets the period
+		# that just ended, not the next one.
+		current_period_end = self.current_invoice_end
+
 		if not self.is_current_invoice_generated(
 			self.current_invoice_start, self.current_invoice_end
 		) and self.can_generate_new_invoice(posting_date):
@@ -575,8 +575,8 @@ class Subscription(Document):
 			self.update_subscription_period()
 
 		if self.cancel_at_period_end and (
-			getdate(posting_date) >= getdate(self.current_invoice_end)
-			or getdate(posting_date) >= getdate(self.end_date)
+			getdate(posting_date) >= getdate(current_period_end)
+			or (self.end_date and getdate(posting_date) >= getdate(self.end_date))
 		):
 			self.cancel_subscription()
 
@@ -756,18 +756,47 @@ def get_prorata_factor(
 	return diff / plan_days
 
 
-def process_all(subscription: str | None = None, posting_date: DateTimeLikeObject | None = None) -> None:
+@frappe.whitelist()
+def get_plan_dimensions(
+	plan: str, company: str | None = None, party_type: str | None = None
+) -> dict[str, str]:
+	"""Resolve a plan's accounting dimensions, falling back to the plan item's company defaults."""
+	plan_doc = frappe.get_cached_doc("Subscription Plan", plan)
+
+	dimensions = {}
+	for dimension in ["cost_center", *get_accounting_dimensions()]:
+		value = plan_doc.get(dimension) or get_item_dimension(plan_doc.item, dimension, company, party_type)
+		if value:
+			dimensions[dimension] = value
+
+	return dimensions
+
+
+def get_item_dimension(
+	item_code: str, dimension: str, company: str | None, party_type: str | None
+) -> str | None:
+	if not company:
+		return None
+
+	item_defaults = get_item_defaults(item_code, company)
+	if dimension != "cost_center":
+		return item_defaults.get(dimension)
+
+	selling = item_defaults.get("selling_cost_center")
+	buying = item_defaults.get("buying_cost_center")
+	if party_type == "Supplier":
+		return buying or selling
+	return selling or buying
+
+
+def process_all(subscription: list, posting_date: DateTimeLikeObject | None = None) -> None:
 	"""
 	Task to updates the status of all `Subscription` apart from those that are cancelled
 	"""
-	filters = {"status": ("!=", "Cancelled")}
 
-	if subscription:
-		filters["name"] = subscription
-
-	for subscription in frappe.get_all("Subscription", filters, pluck="name"):
+	for subscription_name in subscription:
 		try:
-			subscription = frappe.get_doc("Subscription", subscription)
+			subscription = frappe.get_doc("Subscription", subscription_name)
 			subscription.process(posting_date)
 			frappe.db.commit()
 		except frappe.ValidationError:

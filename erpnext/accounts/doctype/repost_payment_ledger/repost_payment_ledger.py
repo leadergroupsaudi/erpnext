@@ -8,7 +8,7 @@ from frappe import _, qb
 from frappe.model.document import Document
 from frappe.query_builder.custom import ConstantColumn
 
-from erpnext.accounts.utils import _delete_pl_entries, create_payment_ledger_entry
+from erpnext.accounts.utils import _delete_adv_pl_entries, _delete_pl_entries, create_payment_ledger_entry
 
 VOUCHER_TYPES = ["Sales Invoice", "Purchase Invoice", "Payment Entry", "Journal Entry"]
 
@@ -16,6 +16,7 @@ VOUCHER_TYPES = ["Sales Invoice", "Purchase Invoice", "Payment Entry", "Journal 
 def repost_ple_for_voucher(voucher_type, voucher_no, gle_map=None):
 	if voucher_type and voucher_no and gle_map:
 		_delete_pl_entries(voucher_type, voucher_no)
+		_delete_adv_pl_entries(voucher_type, voucher_no)
 		create_payment_ledger_entry(gle_map, cancel=0)
 
 
@@ -26,6 +27,7 @@ def start_payment_ledger_repost(docname=None):
 	"""
 	if docname:
 		repost_doc = frappe.get_doc("Repost Payment Ledger", docname)
+		repost_doc.check_permission("submit")
 		if repost_doc.docstatus.is_submitted() and repost_doc.repost_status in ["Queued", "Failed"]:
 			try:
 				for entry in repost_doc.repost_vouchers:
@@ -120,6 +122,8 @@ class RepostPaymentLedger(Document):
 @frappe.whitelist()
 def execute_repost_payment_ledger(docname):
 	"""Repost Payment Ledger Entries by background job."""
+
+	frappe.has_permission("Repost Payment Ledger", ptype="submit", doc=docname, throw=True)
 
 	job_name = "payment_ledger_repost_" + docname
 

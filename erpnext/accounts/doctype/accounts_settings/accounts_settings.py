@@ -41,13 +41,16 @@ class AccountsSettings(Document):
 		check_supplier_invoice_uniqueness: DF.Check
 		create_pr_in_draft_status: DF.Check
 		credit_controller: DF.Link | None
+		default_ageing_range: DF.Data | None
 		delete_linked_ledger_entries: DF.Check
 		determine_address_tax_category_from: DF.Literal["Billing Address", "Shipping Address"]
+		disable_include_dimensions: DF.Check
 		enable_common_party_accounting: DF.Check
 		enable_fuzzy_matching: DF.Check
 		enable_immutable_ledger: DF.Check
 		enable_party_matching: DF.Check
 		exchange_gain_loss_posting_date: DF.Literal["Invoice", "Payment", "Reconciliation Date"]
+		fetch_valuation_rate_for_internal_transaction: DF.Check
 		frozen_accounts_modifier: DF.Link | None
 		general_ledger_remarks_length: DF.Int
 		ignore_account_closing_balance: DF.Check
@@ -58,20 +61,24 @@ class AccountsSettings(Document):
 		merge_similar_account_heads: DF.Check
 		over_billing_allowance: DF.Currency
 		post_change_gl_entries: DF.Check
-		receivable_payable_fetch_method: DF.Literal["Buffered Cursor", "UnBuffered Cursor", "Raw SQL"]
+		pcv_job_timeout: DF.Int
+		receivable_payable_fetch_method: DF.Literal["Buffered Cursor", "UnBuffered Cursor"]
 		receivable_payable_remarks_length: DF.Int
 		reconciliation_queue_size: DF.Int
 		role_allowed_to_over_bill: DF.Link | None
 		role_to_override_stop_action: DF.Link | None
 		round_row_wise_tax: DF.Check
+		show_account_balance: DF.Check
 		show_balance_in_coa: DF.Check
 		show_inclusive_tax_in_print: DF.Check
+		show_party_balance: DF.Check
 		show_payment_schedule_in_print: DF.Check
 		show_taxes_as_table_in_print: DF.Check
 		stale_days: DF.Int
 		submit_journal_entries: DF.Check
 		unlink_advance_payment_on_cancelation_of_order: DF.Check
 		unlink_payment_on_cancellation_of_invoice: DF.Check
+		use_legacy_controller_for_pcv: DF.Check
 	# end: auto-generated types
 
 	def validate(self):
@@ -103,12 +110,25 @@ class AccountsSettings(Document):
 			frappe.clear_cache()
 
 		self.validate_and_sync_auto_reconcile_config()
+		self.hide_or_show_party_and_account_balance()
 
 	def validate_stale_days(self):
 		if not self.allow_stale and cint(self.stale_days) <= 0:
 			frappe.msgprint(
 				_("Stale Days should start from 1."), title="Error", indicator="red", raise_exception=1
 			)
+
+	def hide_or_show_party_and_account_balance(self):
+		def set_property(fieldname, value):
+			make_property_setter("Payment Entry", fieldname, "hidden", value, "Check")
+
+		if self.has_value_changed("show_party_balance"):
+			set_property("party_balance", not self.show_party_balance)
+
+		if self.has_value_changed("show_account_balance"):
+			account_fields = ["paid_from_account_balance", "paid_to_account_balance"]
+			for field in account_fields:
+				set_property(field, not self.show_account_balance)
 
 	def enable_payment_schedule_in_print(self):
 		show_in_print = cint(self.show_payment_schedule_in_print)
@@ -152,11 +172,3 @@ class AccountsSettings(Document):
 				),
 				title=_("Auto Tax Settings Error"),
 			)
-
-	@frappe.whitelist()
-	def drop_ar_sql_procedures(self):
-		from erpnext.accounts.report.accounts_receivable.accounts_receivable import InitSQLProceduresForAR
-
-		frappe.db.sql(f"drop function if exists {InitSQLProceduresForAR.genkey_function_name}")
-		frappe.db.sql(f"drop procedure if exists {InitSQLProceduresForAR.init_procedure_name}")
-		frappe.db.sql(f"drop procedure if exists {InitSQLProceduresForAR.allocate_procedure_name}")

@@ -71,7 +71,6 @@ class QualityInspection(Document):
 				for d in parameters:
 					if reading.specification == d.specification:
 						reading.update(d)
-						reading.status = "Accepted"
 
 		if self.readings:
 			self.inspect_and_set_status()
@@ -253,6 +252,9 @@ class QualityInspection(Document):
 					self.modified,
 				)
 
+		if self.reference_type and self.reference_name:
+			frappe.get_lazy_doc(self.reference_type, self.reference_name).notify_update()
+
 	def inspect_and_set_status(self):
 		for reading in self.readings:
 			if not reading.manual_inspection:  # dont auto set status if manual
@@ -274,7 +276,9 @@ class QualityInspection(Document):
 
 	def set_status_based_on_acceptance_values(self, reading):
 		if not cint(reading.numeric):
-			result = reading.get("reading_value") == reading.get("value")
+			reading_value = reading.get("reading_value") or ""
+			value = reading.get("value") or ""
+			result = reading_value == value
 		else:
 			# numeric readings
 			result = self.min_max_criteria_passed(reading)
@@ -283,9 +287,11 @@ class QualityInspection(Document):
 
 	def min_max_criteria_passed(self, reading):
 		"""Determine whether all readings fall in the acceptable range."""
+		has_reading = False
 		for i in range(1, 11):
 			reading_value = reading.get("reading_" + str(i))
 			if reading_value is not None and reading_value.strip():
+				has_reading = True
 				result = (
 					flt(reading.get("min_value"))
 					<= parse_float(reading_value)
@@ -293,7 +299,7 @@ class QualityInspection(Document):
 				)
 				if not result:
 					return False
-		return True
+		return has_reading
 
 	def set_status_based_on_acceptance_formula(self, reading):
 		if not reading.acceptance_formula:
@@ -360,10 +366,11 @@ def item_query(doctype, txt, searchfield, start, page_len, filters):
 	from frappe.desk.reportview import get_match_cond
 
 	from_doctype = cstr(filters.get("from"))
+	parent_doctype = cstr(filters.get("parent_doctype"))
 	if not from_doctype or not frappe.db.exists("DocType", from_doctype):
 		return []
 
-	mcond = get_match_cond(from_doctype)
+	mcond = get_match_cond(parent_doctype or from_doctype)
 	cond, qi_condition = "", "and (quality_inspection is null or quality_inspection = '')"
 
 	if filters.get("parent"):
@@ -387,9 +394,10 @@ def item_query(doctype, txt, searchfield, start, page_len, filters):
 
 		return frappe.db.sql(
 			f"""
-				SELECT distinct item_code, item_name, item_group
+				SELECT distinct `tab{from_doctype}`.item_code, `tab{from_doctype}`.item_name
 				FROM `tab{from_doctype}`
-				WHERE parent=%(parent)s and docstatus < 2 and item_code like %(txt)s
+				JOIN `tab{parent_doctype}` ON `tab{parent_doctype}`.name = `tab{from_doctype}`.parent
+				WHERE `tab{from_doctype}`.parent=%(parent)s and `tab{parent_doctype}`.docstatus < 2 and `tab{from_doctype}`.item_code like %(txt)s
 				{qi_condition} {cond} {mcond}
 				ORDER BY item_code limit {cint(page_len)} offset {cint(start)}
 			""",
@@ -413,7 +421,7 @@ def item_query(doctype, txt, searchfield, start, page_len, filters):
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
 def quality_inspection_query(doctype, txt, searchfield, start, page_len, filters):
-	return frappe.get_all(
+	return frappe.get_list(
 		"Quality Inspection",
 		limit_start=start,
 		limit_page_length=page_len,

@@ -41,6 +41,7 @@
   "ignore_pricing_rule",
   "sec_warehouse",
   "scan_barcode",
+  "last_scanned_warehouse",
   "column_break_28",
   "set_warehouse",
   "reserve_stock",
@@ -159,6 +160,7 @@
   "language",
   "additional_info_section",
   "is_internal_customer",
+  "ignore_default_payment_terms_template",
   "represents_company",
   "column_break_152",
   "source",
@@ -185,7 +187,6 @@
   },
   {
    "allow_on_submit": 1,
-   "default": "{customer_name}",
    "fieldname": "title",
    "fieldtype": "Data",
    "hidden": 1,
@@ -358,7 +359,6 @@
    "options": "fa fa-bullhorn"
   },
   {
-   "allow_on_submit": 1,
    "fieldname": "customer_address",
    "fieldtype": "Link",
    "hide_days": 1,
@@ -439,7 +439,6 @@
    "width": "50%"
   },
   {
-   "allow_on_submit": 1,
    "fieldname": "shipping_address_name",
    "fieldtype": "Link",
    "hide_days": 1,
@@ -479,6 +478,7 @@
   },
   {
    "collapsible": 1,
+   "collapsible_depends_on": "eval:doc.currency && doc.currency != erpnext.get_currency(doc.company)",
    "fieldname": "currency_and_price_list",
    "fieldtype": "Section Break",
    "hide_days": 1,
@@ -497,6 +497,7 @@
    "oldfieldtype": "Select",
    "options": "Currency",
    "print_hide": 1,
+   "read_only_depends_on": "eval:doc.inter_company_order_reference",
    "reqd": 1,
    "width": "100px"
   },
@@ -1462,6 +1463,7 @@
    "hide_days": 1,
    "hide_seconds": 1,
    "label": "Auto Repeat",
+   "no_copy": 1,
    "options": "Auto Repeat"
   },
   {
@@ -1658,13 +1660,28 @@
    "hidden": 1,
    "label": "Has Unit Price Items",
    "no_copy": 1
+  },
+  {
+   "depends_on": "eval: doc.last_scanned_warehouse",
+   "fieldname": "last_scanned_warehouse",
+   "fieldtype": "Data",
+   "is_virtual": 1,
+   "label": "Last Scanned Warehouse"
+  },
+  {
+   "default": "0",
+   "fieldname": "ignore_default_payment_terms_template",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "label": "Ignore Default Payment Terms Template",
+   "read_only": 1
   }
  ],
  "icon": "fa fa-file-text",
  "idx": 105,
  "is_submittable": 1,
  "links": [],
- "modified": "2025-03-03 16:49:00.676927",
+ "modified": "2026-10-13 12:12:32.911258",
  "modified_by": "Administrator",
  "module": "Selling",
  "name": "Sales Order",
@@ -1731,6 +1748,14 @@
    "read": 1,
    "role": "Sales Manager",
    "write": 1
+  },
+  {
+   "role": "Projects Manager",
+   "select": 1
+  },
+  {
+   "role": "Projects User",
+   "select": 1
   }
  ],
  "row_format": "Dynamic",

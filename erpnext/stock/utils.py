@@ -2,17 +2,19 @@
 # License: GNU General Public License v3. See license.txt
 
 
+import datetime
 import json
 
 import frappe
 from frappe import _
 from frappe.query_builder.functions import CombineDatetime, IfNull, Sum
 from frappe.utils import cstr, flt, get_link_to_form, get_time, getdate, nowdate, nowtime
+from frappe.utils.data import DateTimeLikeObject
 
 import erpnext
-from erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle import (
-	get_available_serial_nos,
-)
+from erpnext import require_user_permission
+from erpnext.stock.doctype.inventory_dimension.inventory_dimension import get_inventory_dimensions
+from erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle import get_available_serial_nos
 from erpnext.stock.doctype.warehouse.warehouse import get_child_warehouses
 from erpnext.stock.serial_batch_bundle import BatchNoValuation, SerialNoValuation
 from erpnext.stock.valuation import FIFOValuation, LIFOValuation
@@ -95,13 +97,37 @@ def get_stock_value_on(
 
 @frappe.whitelist()
 def get_stock_balance(
-	item_code,
-	warehouse,
-	posting_date=None,
-	posting_time=None,
-	with_valuation_rate=False,
-	with_serial_no=False,
-	inventory_dimensions_dict=None,
+	item_code: str,
+	warehouse: str | None,
+	posting_date: DateTimeLikeObject | None = None,
+	posting_time: DateTimeLikeObject | datetime.timedelta | None = None,
+	with_valuation_rate: bool = False,
+	with_serial_no: bool = False,
+	inventory_dimensions_dict: dict | None = None,
+):
+	frappe.has_permission("Item", "read", throw=True)
+	require_user_permission("Item", item_code)
+	require_user_permission("Warehouse", warehouse)
+
+	return _get_stock_balance(
+		item_code,
+		warehouse,
+		posting_date,
+		posting_time,
+		with_valuation_rate,
+		with_serial_no,
+		inventory_dimensions_dict,
+	)
+
+
+def _get_stock_balance(
+	item_code: str,
+	warehouse: str | None,
+	posting_date: DateTimeLikeObject | None = None,
+	posting_time: DateTimeLikeObject | datetime.timedelta | None = None,
+	with_valuation_rate: bool = False,
+	with_serial_no: bool = False,
+	inventory_dimensions_dict: dict | None = None,
 ):
 	"""Returns stock balance quantity at given warehouse on given posting date or current date.
 
@@ -124,8 +150,17 @@ def get_stock_balance(
 	}
 
 	extra_cond = ""
+
 	if inventory_dimensions_dict:
+		inventory_dimensions_fieldname = [d.get("fieldname") for d in get_inventory_dimensions()]
+
 		for field, value in inventory_dimensions_dict.items():
+			if field not in inventory_dimensions_fieldname:
+				frappe.throw(
+					_("{0} is not a valid {1} fieldname.").format(
+						frappe.bold(field), frappe.bold("Inventory Dimension")
+					)
+				)
 			args[field] = value
 			extra_cond += f" and {field} = %({field})s"
 
@@ -138,8 +173,7 @@ def get_stock_balance(
 					{
 						"item_code": item_code,
 						"warehouse": warehouse,
-						"posting_date": posting_date,
-						"posting_time": posting_time,
+						"posting_datetime": get_combine_datetime(posting_date, posting_time),
 						"ignore_warehouse": 1,
 					}
 				)
@@ -168,6 +202,10 @@ def get_serial_nos_data(serial_nos):
 
 @frappe.whitelist()
 def get_latest_stock_qty(item_code, warehouse=None):
+	# same guard as get_stock_balance above, which returns the same Bin quantity. Loser-free for
+	# the only caller: Work Order write is held by Manufacturing User, who holds Item read.
+	frappe.has_permission("Item", "read", throw=True)
+
 	values, condition = [item_code], ""
 	if warehouse:
 		lft, rgt, is_group = frappe.db.get_value("Warehouse", warehouse, ["lft", "rgt", "is_group"])
@@ -239,12 +277,49 @@ def _create_bin(item_code, warehouse):
 
 
 @frappe.whitelist()
-def get_incoming_rate(args, raise_error_if_no_rate=True):
+def get_incoming_rate(args: dict | str, raise_error_if_no_rate: bool = True, fallbacks: bool = True):
+	"""Whitelisted entry point: authorise the caller, then compute the rate."""
+	args = frappe.parse_json(args)
+
+	# `select`, not `read`: reached from every sales and buying form, and Accounts Manager holds no
+	# Item read. doc= so the named item is checked, not merely the doctype.
+	item_code = args.get("item_code") if isinstance(args, dict | frappe._dict) else None
+	warehouse = args.get("warehouse") if isinstance(args, dict | frappe._dict) else None
+
+	if item_code:
+		frappe.has_permission("Item", ptype="select", doc=item_code, throw=True)
+	else:
+		frappe.has_permission("Item", ptype="select", throw=True)
+
+	# scoped by User Permissions alone: Accounts Manager reaches this holding no Warehouse row at all.
+	# Only unscoped rules apply -- an `applicable_for` rule governs that doctype's documents, and a
+	# rate is not one. Not args["voucher_type"]: it is caller-supplied, so it cannot select the scope.
+	if warehouse:
+		from frappe.permissions import get_user_permissions
+
+		if warehouse_permissions := get_user_permissions(frappe.session.user).get("Warehouse"):
+			allowed_warehouses = {
+				perm.get("doc")
+				for perm in warehouse_permissions
+				if perm.get("doc") and not perm.get("applicable_for")
+			}
+			if allowed_warehouses and warehouse not in allowed_warehouses:
+				frappe.throw(_("Not permitted for {0}").format(warehouse), frappe.PermissionError)
+
+	return _get_incoming_rate(args, raise_error_if_no_rate, fallbacks)
+
+
+def _get_incoming_rate(args: dict | str, raise_error_if_no_rate: bool = True, fallbacks: bool = True):
 	"""Get Incoming Rate based on valuation method"""
 	from erpnext.stock.stock_ledger import get_previous_sle, get_valuation_rate
 
 	if isinstance(args, str):
 		args = json.loads(args)
+
+	if not args.get("posting_datetime") and args.get("posting_date"):
+		args["posting_datetime"] = get_combine_datetime(args.get("posting_date"), args.get("posting_time"))
+
+	posting_datetime = args.get("posting_datetime")
 
 	in_rate = None
 
@@ -252,10 +327,12 @@ def get_incoming_rate(args, raise_error_if_no_rate=True):
 		"Item", args.get("item_code"), ["has_serial_no", "has_batch_no"], as_dict=1
 	)
 
-	use_moving_avg_for_batch = frappe.db.get_single_value("Stock Settings", "do_not_use_batchwise_valuation")
-
 	if isinstance(args, dict):
 		args = frappe._dict(args)
+
+	use_moving_avg_for_batch = frappe.db.get_single_value(
+		"Stock Settings", "do_not_use_batchwise_valuation"
+	) and not has_batchwise_valued_batch(args.get("batch_no"), args.get("serial_and_batch_bundle"))
 
 	if item_details and item_details.has_serial_no and args.get("serial_and_batch_bundle"):
 		args.actual_qty = args.qty
@@ -324,7 +401,10 @@ def get_incoming_rate(args, raise_error_if_no_rate=True):
 			args.get("allow_zero_valuation"),
 			currency=erpnext.get_company_currency(args.get("company")),
 			company=args.get("company"),
+			fallbacks=fallbacks,
 			raise_error_if_no_rate=raise_error_if_no_rate,
+			posting_datetime=posting_datetime,
+			creation=args.get("creation"),
 		)
 
 	return flt(in_rate)
@@ -358,6 +438,20 @@ def get_batch_incoming_rate(item_code, warehouse, batch_no, posting_date, postin
 		return batch_details[0].batch_value / batch_details[0].batch_qty
 
 
+def has_batchwise_valued_batch(batch_no: str | None, serial_and_batch_bundle: str | None) -> bool:
+	"""Pooling applies to Moving Average batches only; FIFO batches keep batch-wise valuation."""
+	batches = [batch_no] if batch_no else []
+	if serial_and_batch_bundle:
+		batches = frappe.get_all(
+			"Serial and Batch Entry", {"parent": serial_and_batch_bundle}, pluck="batch_no"
+		)
+
+	return (
+		bool(batches)
+		and frappe.db.exists("Batch", {"name": ("in", batches), "use_batchwise_valuation": 1}) is not None
+	)
+
+
 def get_avg_purchase_rate(serial_nos):
 	"""get average value of serial numbers"""
 
@@ -372,6 +466,7 @@ def get_avg_purchase_rate(serial_nos):
 	)
 
 
+@frappe.request_cache
 def get_valuation_method(item_code):
 	"""get valuation method from item or default"""
 	val_method = frappe.db.get_value("Item", item_code, "valuation_method", cache=True)
@@ -584,16 +679,38 @@ def check_pending_reposting(posting_date: str, throw_error: bool = True) -> bool
 
 
 @frappe.whitelist()
-def scan_barcode(search_value: str) -> BarcodeScanResult:
+def scan_barcode(search_value: str, ctx: dict | str | None = None) -> BarcodeScanResult:
+	# Reached from barcode_scanner.js on every form with a scan field, so `select` for the same
+	# reason as get_incoming_rate: Accounts Manager scans on invoices and holds no Item read.
+	frappe.has_permission("Item", ptype="select", throw=True)
+
+	def authorised(data):
+		# the check above is doctype level; the scan resolves to one Item and that is what the
+		# caller receives, so authorise the resolved row before returning it
+		if data and data.get("item_code"):
+			frappe.has_permission("Item", ptype="select", doc=data.get("item_code"), throw=True)
+		return data
+
 	def set_cache(data: BarcodeScanResult):
 		frappe.cache().set_value(f"erpnext:barcode_scan:{search_value}", data, expires_in_sec=120)
+		_update_item_info(data, ctx)
 
 	def get_cache() -> BarcodeScanResult | None:
-		if data := frappe.cache().get_value(f"erpnext:barcode_scan:{search_value}"):
-			return data
+		data = frappe.cache().get_value(f"erpnext:barcode_scan:{search_value}")
+		if not data:
+			return
+
+		_update_item_info(data, ctx)
+		return data
+
+	if ctx is None:
+		ctx = frappe._dict()
+
+	else:
+		ctx = frappe.parse_json(ctx)
 
 	if scan_data := get_cache():
-		return scan_data
+		return authorised(scan_data)
 
 	# search barcode no
 	barcode_data = frappe.db.get_value(
@@ -603,9 +720,8 @@ def scan_barcode(search_value: str) -> BarcodeScanResult:
 		as_dict=True,
 	)
 	if barcode_data:
-		_update_item_info(barcode_data)
 		set_cache(barcode_data)
-		return barcode_data
+		return authorised(barcode_data)
 
 	# search serial no
 	serial_no_data = frappe.db.get_value(
@@ -615,9 +731,8 @@ def scan_barcode(search_value: str) -> BarcodeScanResult:
 		as_dict=True,
 	)
 	if serial_no_data:
-		_update_item_info(serial_no_data)
 		set_cache(serial_no_data)
-		return serial_no_data
+		return authorised(serial_no_data)
 
 	# search batch no
 	batch_no_data = frappe.db.get_value(
@@ -634,22 +749,36 @@ def scan_barcode(search_value: str) -> BarcodeScanResult:
 				).format(search_value, batch_no_data.item_code)
 			)
 
-		_update_item_info(batch_no_data)
 		set_cache(batch_no_data)
-		return batch_no_data
+		return authorised(batch_no_data)
+
+	warehouse = frappe.get_cached_value("Warehouse", search_value, ("name", "disabled"), as_dict=True)
+	if warehouse and not warehouse.disabled:
+		warehouse_data = {"warehouse": warehouse.name}
+		set_cache(warehouse_data)
+		return warehouse_data
 
 	return {}
 
 
-def _update_item_info(scan_result: dict[str, str | None]) -> dict[str, str | None]:
-	if item_code := scan_result.get("item_code"):
-		if item_info := frappe.get_cached_value(
-			"Item",
-			item_code,
-			["has_batch_no", "has_serial_no"],
-			as_dict=True,
-		):
-			scan_result.update(item_info)
+def _update_item_info(scan_result: dict[str, str | None], ctx: dict | None = None) -> dict[str, str | None]:
+	from erpnext.stock.get_item_details import get_item_warehouse
+
+	item_code = scan_result.get("item_code")
+	if not item_code:
+		return scan_result
+
+	if item_info := frappe.get_cached_value(
+		"Item",
+		item_code,
+		("has_batch_no", "has_serial_no"),
+		as_dict=True,
+	):
+		scan_result.update(item_info)
+
+	if ctx and (warehouse := get_item_warehouse(frappe._dict(name=item_code), ctx, overwrite_warehouse=True)):
+		scan_result["default_warehouse"] = warehouse
+
 	return scan_result
 
 

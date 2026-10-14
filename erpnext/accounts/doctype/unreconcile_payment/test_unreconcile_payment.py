@@ -7,16 +7,30 @@ from frappe.utils import today
 
 from erpnext.accounts.doctype.payment_entry.test_payment_entry import create_payment_entry
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
+from erpnext.accounts.doctype.unreconcile_payment.unreconcile_payment import (
+	create_unreconcile_doc_for_selection,
+)
 from erpnext.accounts.party import get_party_account
 from erpnext.accounts.test.accounts_mixin import AccountsTestMixin
+from erpnext.buying.doctype.purchase_order.test_purchase_order import create_purchase_order
 from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
 from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
+from erpnext.tests.permission_test_utils import (
+	OTHER_COMPANY,
+	as_user,
+	assert_refused_for_names,
+	assert_refused_without,
+	disable_mandatory_accounting_dimensions,
+	make_company_fenced_user,
+	make_fenced_user,
+)
 
 
 class TestUnreconcilePayment(AccountsTestMixin, FrappeTestCase):
 	def setUp(self):
 		self.create_company()
 		self.create_customer()
+		self.create_supplier()
 		self.create_usd_receivable_account()
 		self.create_item()
 		self.clear_old_entries()
@@ -364,13 +378,13 @@ class TestUnreconcilePayment(AccountsTestMixin, FrappeTestCase):
 		# Assert 'Advance Paid'
 		so.reload()
 		pe.reload()
-		self.assertEqual(so.advance_paid, 100)
+		self.assertEqual(so.advance_paid, 0)
 		self.assertEqual(len(pe.references), 0)
 		self.assertEqual(pe.unallocated_amount, 100)
 
 		pe.cancel()
 		so.reload()
-		self.assertEqual(so.advance_paid, 100)
+		self.assertEqual(so.advance_paid, 0)
 
 	def test_06_unreconcile_advance_from_payment_entry(self):
 		self.enable_advance_as_liability()
@@ -417,7 +431,7 @@ class TestUnreconcilePayment(AccountsTestMixin, FrappeTestCase):
 		so2.reload()
 		pe.reload()
 		self.assertEqual(so1.advance_paid, 150)
-		self.assertEqual(so2.advance_paid, 110)
+		self.assertEqual(so2.advance_paid, 0)
 		self.assertEqual(len(pe.references), 1)
 		self.assertEqual(pe.unallocated_amount, 110)
 
@@ -463,8 +477,172 @@ class TestUnreconcilePayment(AccountsTestMixin, FrappeTestCase):
 		self.assertEqual(len(pr.get("invoices")), 0)
 		self.assertEqual(len(pr.get("payments")), 0)
 
-		# Assert 'Advance Paid'
 		so.reload()
 		self.assertEqual(so.advance_paid, 1000)
 
+		unreconcile = frappe.get_doc(
+			{
+				"doctype": "Unreconcile Payment",
+				"company": self.company,
+				"voucher_type": pe.doctype,
+				"voucher_no": pe.name,
+			}
+		)
+		unreconcile.add_references()
+		unreconcile.allocations = [x for x in unreconcile.allocations if x.reference_name == si.name]
+		unreconcile.save().submit()
+
+		# after unreconcilaition advance paid will be reduced
+		# Assert 'Advance Paid'
+		so.reload()
+		self.assertEqual(so.advance_paid, 0)
+
 		self.disable_advance_as_liability()
+
+	def test_unreconcile_advance_from_journal_entry(self):
+		po = create_purchase_order(
+			company=self.company,
+			supplier=self.supplier,
+			item=self.item,
+			qty=1,
+			rate=100,
+			transaction_date=today(),
+			do_not_submit=False,
+		)
+
+		je = frappe.get_doc(
+			{
+				"doctype": "Journal Entry",
+				"company": self.company,
+				"voucher_type": "Journal Entry",
+				"posting_date": po.transaction_date,
+				"multi_currency": True,
+				"accounts": [
+					{
+						"account": "Creditors - _TC",
+						"party_type": "Supplier",
+						"party": po.supplier,
+						"debit_in_account_currency": 100,
+						"is_advance": "Yes",
+						"reference_type": po.doctype,
+						"reference_name": po.name,
+					},
+					{"account": "Cash - _TC", "credit_in_account_currency": 100},
+				],
+			}
+		)
+		je.save().submit()
+		po.reload()
+		self.assertEqual(po.advance_paid, 100)
+
+		unreconcile = frappe.get_doc(
+			{
+				"doctype": "Unreconcile Payment",
+				"company": self.company,
+				"voucher_type": je.doctype,
+				"voucher_no": je.name,
+			}
+		)
+		unreconcile.add_references()
+		self.assertEqual(len(unreconcile.allocations), 1)
+		allocations = [x.reference_name for x in unreconcile.allocations]
+		self.assertEqual([po.name], allocations)
+		unreconcile.save().submit()
+
+		po.reload()
+		self.assertEqual(po.advance_paid, 0)
+
+
+class TestUnreconcilePaymentPermissions(AccountsTestMixin, FrappeTestCase):
+	def setUp(self):
+		disable_mandatory_accounting_dimensions()
+		self.create_company()
+		self.create_customer()
+		self.create_item()
+		self.clear_old_entries()
+		self.invoice = create_sales_invoice(
+			item=self.item,
+			company=self.company,
+			customer=self.customer,
+			debit_to=self.debit_to,
+			posting_date=today(),
+			parent_cost_center=self.cost_center,
+			cost_center=self.cost_center,
+			rate=100,
+			price_list_rate=100,
+		)
+		payment = create_payment_entry(
+			company=self.company,
+			payment_type="Receive",
+			party_type="Customer",
+			party=self.customer,
+			paid_from=self.debit_to,
+			paid_to=self.cash,
+			paid_amount=100,
+			save=True,
+		)
+		payment.append(
+			"references",
+			{
+				"reference_doctype": "Sales Invoice",
+				"reference_name": self.invoice.name,
+				"allocated_amount": 100,
+			},
+		)
+		payment.save().submit()
+		self.payment = payment.name
+
+	def tearDown(self):
+		frappe.db.rollback()
+
+	def selection_kwargs(self, voucher_no, voucher_type="Payment Entry"):
+		return {
+			"selections": frappe.as_json(
+				[
+					{
+						"company": self.company,
+						"voucher_type": voucher_type,
+						"voucher_no": voucher_no,
+						"against_voucher_type": "Sales Invoice",
+						"against_voucher_no": self.invoice.name,
+					}
+				]
+			)
+		}
+
+	def test_unreconcile_refuses_a_voucher_outside_the_company_fence(self):
+		fenced = make_company_fenced_user(
+			"unreconcile-fenced@example.com", ["Accounts Manager"], OTHER_COMPANY
+		)
+		with as_user(fenced):
+			assert_refused_for_names(
+				self,
+				create_unreconcile_doc_for_selection,
+				self.selection_kwargs,
+				[self.payment],
+				caller_supplied=True,
+			)
+			assert_refused_without(
+				self,
+				["linked to", "'_Test Company'"],
+				create_unreconcile_doc_for_selection,
+				**self.selection_kwargs(self.payment),
+			)
+
+	def test_unreconcile_refuses_voucher_types_it_cannot_unreconcile(self):
+		user = make_fenced_user("unreconcile-type@example.com", ["Accounts Manager"])
+		with as_user(user):
+			self.assertRaises(
+				frappe.ValidationError,
+				create_unreconcile_doc_for_selection,
+				**self.selection_kwargs(self.invoice.name, "Sales Invoice"),
+			)
+		self.assertFalse(frappe.db.exists("Unreconcile Payment", {"voucher_no": self.invoice.name}))
+
+	def test_unreconcile_allows_a_user_inside_the_company_fence(self):
+		fenced = make_company_fenced_user(
+			"unreconcile-in-fence@example.com", ["Accounts Manager"], self.company
+		)
+		with as_user(fenced):
+			create_unreconcile_doc_for_selection(**self.selection_kwargs(self.payment))
+		self.assertTrue(frappe.db.exists("Unreconcile Payment", {"voucher_no": self.payment, "docstatus": 1}))

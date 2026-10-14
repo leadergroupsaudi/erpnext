@@ -40,15 +40,6 @@ erpnext.PointOfSale.Controller = class {
 				in_list_view: 1,
 				label: __("Opening Amount"),
 				options: "company:company_currency",
-				onchange: function () {
-					dialog.fields_dict.balance_details.df.data.some((d) => {
-						if (d.idx == this.doc.idx) {
-							d.opening_amount = this.value;
-							dialog.fields_dict.balance_details.grid.refresh();
-							return true;
-						}
-					});
-				},
 			},
 		];
 		const fetch_pos_payment_methods = () => {
@@ -174,8 +165,8 @@ erpnext.PointOfSale.Controller = class {
 	set_opening_entry_status() {
 		this.page.set_title_sub(
 			`<span class="indicator orange">
-				<a class="text-muted" href="#Form/POS%20Opening%20Entry/${this.pos_opening}">
-					Opened at ${frappe.datetime.str_to_user(this.pos_opening_time)}
+				<a class="text-muted" href="#Form/POS%20Opening%20Entry/${encodeURIComponent(this.pos_opening)}">
+					Opened at ${frappe.utils.escape_html(frappe.datetime.str_to_user(this.pos_opening_time))}
 				</a>
 			</span>`
 		);
@@ -421,6 +412,7 @@ erpnext.PointOfSale.Controller = class {
 	init_payments() {
 		this.payment = new erpnext.PointOfSale.Payment({
 			wrapper: this.$components_wrapper,
+			settings: this.settings,
 			events: {
 				get_frm: () => this.frm || {},
 
@@ -605,6 +597,9 @@ erpnext.PointOfSale.Controller = class {
 
 	async on_cart_update(args) {
 		frappe.dom.freeze();
+		if (this.frm.doc.set_warehouse !== this.settings.warehouse) {
+			this.frm.set_value("set_warehouse", this.settings.warehouse);
+		}
 		let item_row = undefined;
 		try {
 			let { field, value, item } = args;
@@ -758,12 +753,16 @@ erpnext.PointOfSale.Controller = class {
 		const resp = (await this.get_available_stock(item_row.item_code, warehouse)).message;
 		const available_qty = resp[0];
 		const is_stock_item = resp[1];
+		const is_negative_stock_allowed = resp[2];
 
 		frappe.dom.unfreeze();
 		const bold_uom = item_row.stock_uom.bold();
 		const bold_item_code = item_row.item_code.bold();
 		const bold_warehouse = warehouse.bold();
 		const bold_available_qty = available_qty.toString().bold();
+
+		if (is_negative_stock_allowed) return;
+
 		if (!(available_qty > 0)) {
 			if (is_stock_item) {
 				frappe.model.clear_doc(item_row.doctype, item_row.name);

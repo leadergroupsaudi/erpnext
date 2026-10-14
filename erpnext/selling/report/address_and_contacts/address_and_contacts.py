@@ -3,15 +3,26 @@
 
 
 import frappe
+from frappe import _
 
 field_map = {
-	"Contact": ["first_name", "last_name", "phone", "mobile_no", "email_id", "is_primary_contact"],
+	"Contact": [
+		"name",
+		"first_name",
+		"last_name",
+		"designation",
+		"phone",
+		"mobile_no",
+		"email_id",
+		"is_primary_contact",
+	],
 	"Address": [
+		"name",
 		"address_line1",
 		"address_line2",
+		"pincode",
 		"city",
 		"state",
-		"pincode",
 		"country",
 		"is_primary_address",
 	],
@@ -29,6 +40,12 @@ def get_columns(filters):
 	return [
 		f"{party_type}:Link/{party_type}",
 		f"{frappe.unscrub(str(party_type_value))}::150",
+		{
+			"label": _("Address"),
+			"fieldtype": "Link",
+			"options": "Address",
+			"hidden": 1,
+		},
 		"Address Line 1",
 		"Address Line 2",
 		"Postal Code",
@@ -36,8 +53,10 @@ def get_columns(filters):
 		"State",
 		"Country",
 		"Is Primary Address:Check",
+		{"label": _("Contact"), "fieldtype": "Link", "options": "Contact", "hidden": 1},
 		"First Name",
 		"Last Name",
+		"Designation",
 		"Phone",
 		"Mobile No",
 		"Email Id",

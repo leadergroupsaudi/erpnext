@@ -82,13 +82,15 @@ class AccountingDimension(Document):
 			else:
 				frappe.throw(_("Company {0} is added more than once").format(frappe.bold(default.company)))
 
-	def after_insert(self):
+	def on_update(self):
 		if frappe.flags.in_test:
 			make_dimension_in_accounting_doctypes(doc=self)
 		else:
 			frappe.enqueue(
 				make_dimension_in_accounting_doctypes, doc=self, queue="long", enqueue_after_commit=True
 			)
+		frappe.flags.accounting_dimensions = None
+		frappe.flags.accounting_dimensions_details = None
 
 	def on_trash(self):
 		if frappe.flags.in_test:
@@ -103,25 +105,19 @@ class AccountingDimension(Document):
 		if not self.fieldname:
 			self.fieldname = scrub(self.label)
 
-	def on_update(self):
-		frappe.flags.accounting_dimensions = None
-		frappe.flags.accounting_dimensions_details = None
-
 
 def make_dimension_in_accounting_doctypes(doc, doclist=None):
 	if not doclist:
 		doclist = get_doctypes_with_dimensions()
-
 	doc_count = len(get_accounting_dimensions())
 	count = 0
-	repostable_doctypes = get_allowed_types_from_settings()
+	repostable_doctypes = get_allowed_types_from_settings(child_doc=True)
 
 	for doctype in doclist:
 		if (doc_count + 1) % 2 == 0:
 			insert_after_field = "dimension_col_break"
 		else:
 			insert_after_field = "accounting_dimensions_section"
-
 		df = {
 			"fieldname": doc.fieldname,
 			"label": doc.label,
@@ -211,8 +207,11 @@ def delete_accounting_dimension(doc):
 		frappe.clear_cache(doctype=doctype)
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def disable_dimension(doc):
+	# toggle_disabling rewrites a Custom Field site-wide, so demand the write that configures dimensions
+	frappe.has_permission("Accounting Dimension", "write", throw=True)
+
 	if frappe.flags.in_test:
 		toggle_disabling(doc=doc)
 	else:
@@ -311,8 +310,8 @@ def get_dimensions(with_cost_center_and_project=False):
 	if with_cost_center_and_project:
 		dimension_filters.extend(
 			[
-				{"fieldname": "cost_center", "document_type": "Cost Center"},
-				{"fieldname": "project", "document_type": "Project"},
+				frappe._dict({"fieldname": "cost_center", "document_type": "Cost Center"}),
+				frappe._dict({"fieldname": "project", "document_type": "Project"}),
 			]
 		)
 

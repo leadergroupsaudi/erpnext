@@ -16,6 +16,7 @@ class StockRepostingSettings(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		do_not_fetch_incoming_rate_from_serial_no: DF.Check
 		end_time: DF.Time | None
 		item_based_reposting: DF.Check
 		limit_reposting_timeslot: DF.Check
@@ -45,9 +46,11 @@ class StockRepostingSettings(Document):
 		if diff < 10:
 			self.end_time = get_time_str(add_to_date(self.start_time, hours=10, as_datetime=True))
 
-	@frappe.whitelist()
+	@frappe.whitelist(methods=["POST"])
 	def convert_to_item_wh_reposting(self):
 		"""Convert Transaction reposting to Item Warehouse based reposting if Item Based Reposting has enabled."""
+
+		self.check_permission("write")
 
 		reposting_data = get_reposting_entries()
 
@@ -84,7 +87,7 @@ def get_reposting_entries():
 def get_stock_ledgers(vouchers):
 	return frappe.get_all(
 		"Stock Ledger Entry",
-		fields=["item_code", "warehouse", "posting_date"],
+		fields=["item_code", "warehouse", "posting_date", "posting_time", "posting_datetime"],
 		filters={"voucher_no": ("in", vouchers)},
 	)
 

@@ -77,7 +77,6 @@
    "options": "Work Order"
   },
   {
-   "allow_on_submit": 1,
    "fieldname": "locations",
    "fieldtype": "Table",
    "label": "Item Locations",
@@ -185,7 +184,7 @@
    "in_standard_filter": 1,
    "label": "Status",
    "no_copy": 1,
-   "options": "Draft\nOpen\nPartly Delivered\nCompleted\nCancelled",
+   "options": "Draft\nOpen\nPartly Delivered\nPartially Transferred\nCompleted\nCancelled",
    "print_hide": 1,
    "read_only": 1,
    "report_hide": 1,
@@ -201,7 +200,7 @@
   },
   {
    "default": "0",
-   "description": "If enabled then system won't override the picked qty / batches / serial numbers.",
+   "description": "If enabled then system won't override the picked qty / batches / serial numbers / warehouse.",
    "fieldname": "pick_manually",
    "fieldtype": "Check",
    "label": "Pick Manually"
@@ -247,7 +246,7 @@
  ],
  "is_submittable": 1,
  "links": [],
- "modified": "2025-05-31 19:18:30.860044",
+ "modified": "2026-07-10 11:39:13.000000",
  "modified_by": "Administrator",
  "module": "Stock",
  "name": "Pick List",

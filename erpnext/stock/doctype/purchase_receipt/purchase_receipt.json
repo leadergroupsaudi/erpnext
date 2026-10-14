@@ -33,6 +33,7 @@
   "currency_and_price_list",
   "currency",
   "conversion_rate",
+  "use_transaction_date_exchange_rate",
   "column_break2",
   "buying_price_list",
   "price_list_currency",
@@ -40,6 +41,7 @@
   "ignore_pricing_rule",
   "sec_warehouse",
   "scan_barcode",
+  "last_scanned_warehouse",
   "column_break_31",
   "set_warehouse",
   "set_from_warehouse",
@@ -243,6 +245,7 @@
    "width": "100px"
   },
   {
+   "default": "Now",
    "fieldname": "posting_time",
    "fieldtype": "Time",
    "label": "Posting Time",
@@ -363,6 +366,7 @@
   },
   {
    "collapsible": 1,
+   "collapsible_depends_on": "eval:doc.currency && doc.currency != erpnext.get_currency(doc.company)",
    "fieldname": "currency_and_price_list",
    "fieldtype": "Section Break",
    "label": "Currency and Price List",
@@ -376,6 +380,7 @@
    "oldfieldtype": "Select",
    "options": "Currency",
    "print_hide": 1,
+   "read_only_depends_on": "eval:doc.inter_company_reference",
    "reqd": 1
   },
   {
@@ -388,6 +393,14 @@
    "precision": "9",
    "print_hide": 1,
    "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "use_transaction_date_exchange_rate",
+   "fieldtype": "Check",
+   "label": "Use Transaction Date Exchange Rate",
+   "no_copy": 1,
+   "read_only": 1
   },
   {
    "fieldname": "column_break2",
@@ -891,7 +904,7 @@
    "no_copy": 1,
    "oldfieldname": "status",
    "oldfieldtype": "Select",
-   "options": "\nDraft\nPartly Billed\nTo Bill\nCompleted\nReturn Issued\nCancelled\nClosed",
+   "options": "\nDraft\nPartly Billed\nTo Bill\nCompleted\nReturn\nReturn Issued\nCancelled\nClosed",
    "print_hide": 1,
    "print_width": "150px",
    "read_only": 1,
@@ -1083,7 +1096,8 @@
    "no_copy": 1,
    "options": "Delivery Note",
    "print_hide": 1,
-   "read_only": 1
+   "read_only": 1,
+   "search_index": 1
   },
   {
    "fieldname": "scan_barcode",
@@ -1245,11 +1259,12 @@
    "label": "Named Place"
   },
   {
-   "depends_on": "eval: (doc.is_subcontracted && !doc.is_old_subcontracting_flow)",
+   "depends_on": "subcontracting_receipt",
    "fieldname": "subcontracting_receipt",
    "fieldtype": "Link",
    "label": "Subcontracting Receipt",
    "options": "Subcontracting Receipt",
+   "read_only": 1,
    "search_index": 1
   },
   {
@@ -1283,6 +1298,13 @@
    "label": "Dispatch Address",
    "print_hide": 1,
    "read_only": 1
+  },
+  {
+   "depends_on": "eval: doc.last_scanned_warehouse",
+   "fieldname": "last_scanned_warehouse",
+   "fieldtype": "Data",
+   "is_virtual": 1,
+   "label": "Last Scanned Warehouse"
   }
  ],
  "grid_page_length": 50,
@@ -1290,7 +1312,7 @@
  "idx": 261,
  "is_submittable": 1,
  "links": [],
- "modified": "2025-04-09 16:52:19.323878",
+ "modified": "2026-10-13 12:12:32.911258",
  "modified_by": "Administrator",
  "module": "Stock",
  "name": "Purchase Receipt",
@@ -1349,6 +1371,18 @@
    "read": 1,
    "role": "Stock Manager",
    "write": 1
+  },
+  {
+   "role": "Delivery Manager",
+   "select": 1
+  },
+  {
+   "role": "Delivery User",
+   "select": 1
+  },
+  {
+   "role": "Quality Manager",
+   "select": 1
   }
  ],
  "row_format": "Dynamic",

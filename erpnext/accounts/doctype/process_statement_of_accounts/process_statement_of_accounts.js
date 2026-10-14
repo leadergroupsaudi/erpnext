@@ -41,6 +41,16 @@ frappe.ui.form.on("Process Statement Of Accounts", {
 							window.location = url;
 						}
 					},
+					error: function (xhr) {
+						// show the server's reason (e.g. permission errors) instead of a blank failure
+						if (xhr.responseJSON && xhr.responseJSON._server_messages) {
+							frappe.msgprint(
+								JSON.parse(JSON.parse(xhr.responseJSON._server_messages)[0]).message
+							);
+						} else {
+							frappe.msgprint(__("Could not download the statement. Please try again."));
+						}
+					},
 				});
 			});
 		}
@@ -92,6 +102,7 @@ frappe.ui.form.on("Process Statement Of Accounts", {
 		frm.set_value("account", "");
 		frm.set_value("cost_center", "");
 		frm.set_value("project", "");
+		erpnext.utils.set_letter_head(frm);
 	},
 	report: function (frm) {
 		let filters = {

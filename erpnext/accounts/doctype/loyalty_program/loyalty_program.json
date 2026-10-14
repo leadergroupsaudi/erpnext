@@ -24,6 +24,7 @@
   "accounting_dimensions_section",
   "cost_center",
   "dimension_col_break",
+  "project",
   "help_section",
   "loyalty_program_help"
  ],
@@ -143,9 +144,15 @@
   {
    "fieldname": "dimension_col_break",
    "fieldtype": "Column Break"
+  },
+  {
+    "fieldname": "project",
+    "fieldtype": "Link",
+    "label": "Project",
+    "options": "Project"
   }
  ],
- "modified": "2019-05-26 09:11:46.120251",
+ "modified": "2026-09-16 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Loyalty Program",
@@ -162,6 +169,14 @@
    "role": "System Manager",
    "share": 1,
    "write": 1
+  },
+  {
+   "role": "Sales Master Manager",
+   "select": 1
+  },
+  {
+   "role": "Sales User",
+   "select": 1
   }
  ],
  "quick_entry": 1,

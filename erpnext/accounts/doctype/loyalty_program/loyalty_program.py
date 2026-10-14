@@ -5,6 +5,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.query_builder.functions import Sum
 from frappe.utils import flt, today
 
 
@@ -45,21 +46,29 @@ def get_loyalty_details(
 	if not expiry_date:
 		expiry_date = today()
 
-	condition = ""
-	if company:
-		condition = " and company=%s " % frappe.db.escape(company)
-	if not include_expired_entry:
-		condition += " and expiry_date>='%s' " % expiry_date
+	LoyaltyPointEntry = frappe.qb.DocType("Loyalty Point Entry")
 
-	loyalty_point_details = frappe.db.sql(
-		f"""select sum(loyalty_points) as loyalty_points,
-		sum(purchase_amount) as total_spent from `tabLoyalty Point Entry`
-		where customer=%s and loyalty_program=%s and posting_date <= %s
-		{condition}
-		group by customer""",
-		(customer, loyalty_program, expiry_date),
-		as_dict=1,
+	query = (
+		frappe.qb.from_(LoyaltyPointEntry)
+		.select(
+			Sum(LoyaltyPointEntry.loyalty_points).as_("loyalty_points"),
+			Sum(LoyaltyPointEntry.purchase_amount).as_("total_spent"),
+		)
+		.where(
+			(LoyaltyPointEntry.customer == customer)
+			& (LoyaltyPointEntry.loyalty_program == loyalty_program)
+			& (LoyaltyPointEntry.posting_date <= expiry_date)
+		)
+		.groupby(LoyaltyPointEntry.customer)
 	)
+
+	if company:
+		query = query.where(LoyaltyPointEntry.company == company)
+
+	if not include_expired_entry:
+		query = query.where(LoyaltyPointEntry.expiry_date >= expiry_date)
+
+	loyalty_point_details = query.run(as_dict=True)
 
 	if loyalty_point_details:
 		return loyalty_point_details[0]
@@ -77,6 +86,8 @@ def get_loyalty_program_details_with_points(
 	include_expired_entry=False,
 	current_transaction_amount=0,
 ):
+	frappe.has_permission("Customer", doc=customer, throw=True)
+
 	lp_details = get_loyalty_program_details(customer, loyalty_program, company=company, silent=silent)
 	loyalty_program = frappe.get_doc("Loyalty Program", loyalty_program)
 	lp_details.update(
@@ -107,6 +118,10 @@ def get_loyalty_program_details(
 	silent=False,
 	include_expired_entry=False,
 ):
+	# authorise the customer, not the programme: a Loyalty Program check is read-only to System
+	# Manager and would deny every role that fills in the two calling forms.
+	frappe.has_permission("Customer", doc=customer, throw=True)
+
 	lp_details = frappe._dict()
 
 	if not loyalty_program:
@@ -128,6 +143,13 @@ def get_loyalty_program_details(
 
 @frappe.whitelist()
 def get_redeemption_factor(loyalty_program=None, customer=None):
+	# both call sites send only `loyalty_program`, so the calling form is the boundary; the customer branch stays guarded
+	if not (frappe.has_permission("Sales Invoice") or frappe.has_permission("POS Invoice")):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+	if customer:
+		frappe.has_permission("Customer", doc=customer, throw=True)
+
 	customer_loyalty_program = None
 	if not loyalty_program:
 		customer_loyalty_program = frappe.db.get_value("Customer", customer, "loyalty_program")

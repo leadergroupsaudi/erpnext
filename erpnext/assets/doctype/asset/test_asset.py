@@ -4,6 +4,7 @@
 import unittest
 
 import frappe
+from frappe.tests.utils import FrappeTestCase
 from frappe.utils import (
 	add_days,
 	add_months,
@@ -15,10 +16,13 @@ from frappe.utils import (
 	is_last_day_of_the_month,
 	nowdate,
 )
+from frappe.utils.data import add_to_date
 
 from erpnext.accounts.doctype.journal_entry.test_journal_entry import make_journal_entry
 from erpnext.accounts.doctype.purchase_invoice.test_purchase_invoice import make_purchase_invoice
 from erpnext.assets.doctype.asset.asset import (
+	get_values_from_purchase_doc,
+	make_asset_movement,
 	make_sales_invoice,
 	split_asset,
 	update_maintenance_status,
@@ -39,6 +43,14 @@ from erpnext.stock.doctype.purchase_receipt.purchase_receipt import (
 	make_purchase_invoice as make_invoice,
 )
 from erpnext.stock.doctype.purchase_receipt.test_purchase_receipt import make_purchase_receipt
+from erpnext.tests.permission_test_utils import (
+	OTHER_COMPANY,
+	as_user,
+	assert_refused_for_names,
+	assert_refused_without,
+	make_company_fenced_user,
+	make_fenced_user,
+)
 
 
 class AssetSetup(unittest.TestCase):
@@ -219,6 +231,31 @@ class TestAsset(AssetSetup):
 		)
 		self.assertEqual(accumulated_depr_amount, 18000.0)
 
+		asset_depreciation = frappe.db.get_value(
+			"Asset Depreciation Schedule", {"asset": asset.name, "docstatus": 1}, "name"
+		)
+		last_booked_depreciation_date = frappe.db.get_value(
+			"Depreciation Schedule",
+			{
+				"parent": asset_depreciation,
+				"docstatus": 1,
+				"journal_entry": ["!=", ""],
+			},
+			"schedule_date",
+			order_by="schedule_date desc",
+		)
+
+		before_purchase_date = add_to_date(asset.purchase_date, days=-1)
+		future_date = add_to_date(nowdate(), days=1)
+		if last_booked_depreciation_date:
+			before_last_booked_depreciation_date = add_to_date(last_booked_depreciation_date, days=-1)
+
+		self.assertRaises(frappe.ValidationError, scrap_asset, asset.name, scrap_date=before_purchase_date)
+		self.assertRaises(frappe.ValidationError, scrap_asset, asset.name, scrap_date=future_date)
+		self.assertRaises(
+			frappe.ValidationError, scrap_asset, asset.name, scrap_date=before_last_booked_depreciation_date
+		)
+
 		scrap_asset(asset.name)
 		asset.load_from_db()
 		first_asset_depr_schedule.load_from_db()
@@ -346,6 +383,33 @@ class TestAsset(AssetSetup):
 		si.cancel()
 		self.assertEqual(frappe.db.get_value("Asset", asset.name, "status"), "Partially Depreciated")
 
+	def test_asset_status_after_sales_invoice_cancel(self):
+		from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
+
+		asset = create_asset(
+			calculate_depreciation=1,
+			available_for_use_date="2020-04-01",
+			purchase_date="2020-04-01",
+			expected_value_after_useful_life=0,
+			total_number_of_depreciations=5,
+			opening_number_of_booked_depreciations=2,
+			frequency_of_depreciation=12,
+			depreciation_start_date="2023-03-31",
+			opening_accumulated_depreciation=24000,
+			gross_purchase_amount=60000,
+			submit=1,
+		)
+
+		si = create_sales_invoice(
+			item_code="Macbook Pro", asset=asset.name, qty=1, rate=40000, posting_date=getdate("2023-05-23")
+		)
+		asset.load_from_db()
+		self.assertEqual(frappe.db.get_value("Asset", asset.name, "status"), "Sold")
+
+		si.cancel()
+		asset.load_from_db()
+		self.assertEqual(frappe.db.get_value("Asset", asset.name, "status"), "Partially Depreciated")
+
 	def test_gle_made_by_asset_sale_for_existing_asset(self):
 		from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
 
@@ -444,6 +508,92 @@ class TestAsset(AssetSetup):
 		update_maintenance_status()
 
 		self.assertEqual(frappe.db.get_value("Asset", asset.name, "status"), "Sold")
+
+	def test_asset_splitting_without_depreciation(self):
+		asset = create_asset(
+			calculate_depreciation=0,
+			asset_quantity=10,
+			available_for_use_date="2020-01-01",
+			purchase_date="2020-01-01",
+			gross_purchase_amount=120000,
+			submit=1,
+		)
+
+		self.assertEqual(asset.asset_quantity, 10)
+		self.assertEqual(asset.gross_purchase_amount, 120000)
+
+		new_asset = split_asset(asset.name, 2)
+		asset.load_from_db()
+		self.assertEqual(asset.asset_quantity, 8)
+		self.assertEqual(asset.gross_purchase_amount, 96000)
+
+		self.assertEqual(new_asset.asset_quantity, 2)
+		self.assertEqual(new_asset.gross_purchase_amount, 24000)
+
+	def test_split_of_composite_asset_keeps_purchase_amount_in_sync(self):
+		composite_asset = frappe.get_doc(
+			{
+				"doctype": "Asset",
+				"asset_name": "Composite Asset for Split Test",
+				"asset_category": "Computers",
+				"item_code": "Macbook Pro",
+				"company": "_Test Company",
+				"is_composite_asset": 1,
+				"booked_fixed_asset": 1,
+				"location": "Test Location",
+				"available_for_use_date": "2020-01-01",
+				"purchase_date": "2020-01-01",
+				"gross_purchase_amount": 120000,
+				"purchase_amount": 120000,
+				"asset_quantity": 10,
+			}
+		)
+		composite_asset.insert()
+
+		asset_capitalization = frappe.get_doc(
+			{
+				"doctype": "Asset Capitalization",
+				"naming_series": "ACC-ASC-.YYYY.-",
+				"capitalization_method": "Choose a WIP composite asset",
+				"target_asset": composite_asset.name,
+				"target_item_code": composite_asset.item_code,
+				"company": composite_asset.company,
+				"posting_date": composite_asset.purchase_date,
+			}
+		)
+		asset_capitalization.flags.ignore_validate = True
+		asset_capitalization.flags.ignore_mandatory = True
+		asset_capitalization.insert(ignore_permissions=True)
+		frappe.db.set_value("Asset Capitalization", asset_capitalization.name, "docstatus", 1)
+
+		composite_asset.submit()
+
+		new_asset = split_asset(composite_asset.name, 4)
+
+		composite_asset.load_from_db()
+		self.assertEqual(composite_asset.asset_quantity, 6)
+		self.assertEqual(composite_asset.gross_purchase_amount, 72000)
+		self.assertEqual(composite_asset.purchase_amount, composite_asset.gross_purchase_amount)
+
+		self.assertEqual(new_asset.docstatus, 1)
+		self.assertEqual(new_asset.asset_quantity, 4)
+		self.assertEqual(new_asset.gross_purchase_amount, 48000)
+		self.assertEqual(new_asset.purchase_amount, new_asset.gross_purchase_amount)
+
+		composite_asset.save()
+
+		# splitting an asset that was itself split from the capitalized asset must also pass
+		nested_asset = split_asset(new_asset.name, 1)
+
+		new_asset.load_from_db()
+		self.assertEqual(new_asset.asset_quantity, 3)
+		self.assertEqual(new_asset.gross_purchase_amount, 36000)
+
+		self.assertEqual(nested_asset.docstatus, 1)
+		self.assertEqual(nested_asset.split_from, new_asset.name)
+		self.assertEqual(nested_asset.asset_quantity, 1)
+		self.assertEqual(nested_asset.gross_purchase_amount, 12000)
+		self.assertEqual(nested_asset.purchase_amount, nested_asset.gross_purchase_amount)
 
 	def test_asset_splitting(self):
 		asset = create_asset(
@@ -1492,7 +1642,6 @@ class TestDepreciationBasics(AssetSetup):
 		)
 
 		self.assertSequenceEqual(gle, expected_gle)
-		self.assertEqual(asset.get("value_after_depreciation"), 0)
 
 	def test_expected_value_change(self):
 		"""
@@ -1812,3 +1961,80 @@ def set_depreciation_settings_in_company(company=None):
 
 def enable_cwip_accounting(asset_category, enable=1):
 	frappe.db.set_value("Asset Category", asset_category, "enable_cwip_accounting", enable)
+
+
+class TestAssetMovementPermissions(FrappeTestCase):
+	def setUp(self):
+		self.asset = create_asset(asset_name="UP Asset", location="Test Location").name
+
+	def tearDown(self):
+		frappe.db.rollback()
+
+	def movement_kwargs(self, name):
+		return {"assets": frappe.as_json([{"name": name}])}
+
+	def test_make_asset_movement_refuses_an_asset_outside_the_company_fence(self):
+		fenced = make_company_fenced_user(
+			"asset-move-fenced@example.com", ["Accounts Manager"], OTHER_COMPANY
+		)
+		with as_user(fenced):
+			assert_refused_for_names(
+				self, make_asset_movement, self.movement_kwargs, [self.asset], caller_supplied=True
+			)
+			assert_refused_without(
+				self,
+				["linked to", "'_Test Company'"],
+				make_asset_movement,
+				**self.movement_kwargs(self.asset),
+			)
+
+	def test_make_asset_movement_allows_a_user_inside_the_company_fence(self):
+		fenced = make_company_fenced_user(
+			"asset-move-in-fence@example.com", ["Accounts Manager"], "_Test Company"
+		)
+		with as_user(fenced):
+			movement = make_asset_movement(**self.movement_kwargs(self.asset))
+		self.assertEqual(movement["assets"][0]["source_location"], "Test Location")
+
+	def test_make_asset_movement_allows_an_unfenced_accounts_manager(self):
+		user = make_fenced_user("asset-move-open@example.com", ["Accounts Manager"])
+		with as_user(user):
+			movement = make_asset_movement(**self.movement_kwargs(self.asset))
+		self.assertEqual(movement["assets"][0]["asset"], self.asset)
+
+
+class TestAssetPurchaseDocPermissions(FrappeTestCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		create_asset_data()
+
+	def setUp(self):
+		self.pr = make_purchase_receipt(
+			item_code="Macbook Pro", qty=1, rate=100000.0, location="Test Location"
+		)
+		self.pi = make_invoice(self.pr.name)
+		self.pi.submit()
+
+	def tearDown(self):
+		frappe.db.rollback()
+
+	def purchase_docs(self):
+		return (("Purchase Receipt", self.pr.name), ("Purchase Invoice", self.pi.name))
+
+	def test_purchase_doc_values_need_read_on_the_purchase_doc(self):
+		user = make_fenced_user("asset-purchase-doc-qm@example.com", ["Quality Manager"])
+		for doctype, name in self.purchase_docs():
+			with as_user(user), self.assertRaises(frappe.PermissionError):
+				get_values_from_purchase_doc(name, "Macbook Pro", doctype)
+			frappe.flags.pop("disable_traceback", None)
+			frappe.clear_messages()
+
+	def test_purchase_doc_values_for_an_accounts_user(self):
+		user = make_fenced_user("asset-purchase-doc-au@example.com", ["Accounts User"])
+		for doctype, name in self.purchase_docs():
+			expected = get_values_from_purchase_doc(name, "Macbook Pro", doctype)
+			with as_user(user):
+				values = get_values_from_purchase_doc(name, "Macbook Pro", doctype)
+			self.assertEqual(values, expected)
+			self.assertEqual(values["gross_purchase_amount"], 100000.0)

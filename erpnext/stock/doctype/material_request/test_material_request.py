@@ -12,12 +12,15 @@ from frappe.utils import flt, today
 from erpnext.controllers.accounts_controller import InvalidQtyError
 from erpnext.stock.doctype.item.test_item import create_item
 from erpnext.stock.doctype.material_request.material_request import (
+	create_pick_list,
 	make_in_transit_stock_entry,
 	make_purchase_order,
+	make_request_for_quotation,
 	make_stock_entry,
 	make_supplier_quotation,
 	raise_work_orders,
 )
+from erpnext.stock.doctype.stock_entry.stock_entry import make_stock_in_entry
 from erpnext.stock.doctype.warehouse.test_warehouse import create_warehouse
 
 
@@ -44,6 +47,26 @@ class TestMaterialRequest(FrappeTestCase):
 
 		self.assertEqual(po.doctype, "Purchase Order")
 		self.assertEqual(len(po.get("items")), len(mr.get("items")))
+
+	def test_make_request_for_quotation_skips_ordered_items(self):
+		mr = frappe.copy_doc(test_records[0]).insert()
+		mr = frappe.get_doc("Material Request", mr.name)
+		mr.submit()
+
+		# fully order the first item, leave the second pending
+		po = make_purchase_order(mr.name)
+		po.supplier = "_Test Supplier"
+		po.schedule_date = today()
+		po.items = [po.items[0]]
+		po.items[0].schedule_date = today()
+		po.insert()
+		po.submit()
+
+		rfq = make_request_for_quotation(mr.name)
+
+		self.assertEqual(len(rfq.get("items")), 1)
+		self.assertEqual(rfq.items[0].material_request_item, mr.items[1].name)
+		self.assertEqual(rfq.items[0].qty, mr.items[1].qty)
 
 	def test_make_supplier_quotation(self):
 		mr = frappe.copy_doc(test_records[0]).insert()
@@ -793,6 +816,28 @@ class TestMaterialRequest(FrappeTestCase):
 		mr = frappe.get_doc("Material Request", mr.name)
 		self.assertEqual(mr.per_ordered, 100)
 
+	def test_fractional_conversion_factor_for_purchase(self):
+		item = create_item("_Test Fractional Conversion Item", stock_uom="Kg", is_purchase_item=1)
+		conversion_factor = 0.453592292
+
+		mr = make_material_request(
+			item_code=item.name,
+			qty=1000,
+			uom="Pound",
+			conversion_factor=conversion_factor,
+		)
+		mr.reload()
+
+		self.assertEqual(mr.items[0].conversion_factor, conversion_factor)
+
+		po = make_purchase_order(mr.name)
+		po.supplier = "_Test Supplier"
+		po.insert()
+		po.reload()
+
+		self.assertEqual(po.items[0].conversion_factor, conversion_factor)
+		self.assertEqual(po.items[0].stock_qty, mr.items[0].stock_qty)
+
 	def test_customer_provided_parts_mr(self):
 		create_item("CUST-0987", is_customer_provided_item=1, customer="_Test Customer", is_purchase_item=0)
 		existing_requested_qty = self._get_requested_qty("_Test Customer", "_Test Warehouse - _TC")
@@ -866,6 +911,191 @@ class TestMaterialRequest(FrappeTestCase):
 		for perm in permissions:
 			perm.delete()
 
+	def test_manufacture_type_status_over_wo(self):
+		from erpnext.stock.doctype.material_request.material_request import raise_work_orders
+
+		mr = make_material_request(
+			item_code="_Test FG Item", material_request_type="Manufacture", do_not_submit=False
+		)
+
+		work_order = raise_work_orders(mr.name)
+		wo = frappe.get_doc("Work Order", work_order[0])
+		wo.wip_warehouse = "_Test Warehouse 1 - _TC"
+		wo.submit()
+
+		mr.reload()
+
+		self.assertEqual(mr.per_ordered, 100)
+		self.assertEqual(mr.status, "Ordered")
+
+	def test_material_request_qty_over_sales_order_limit(self):
+		from erpnext.controllers.status_updater import OverAllowanceError
+		from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
+
+		so = make_sales_order()
+		mr = make_material_request(qty=100, do_not_submit=True)
+		mr.items[0].sales_order = so.name
+		mr.items[0].sales_order_item = so.items[0].name
+		mr.save()
+
+		self.assertRaises(OverAllowanceError, mr.submit)
+
+	def test_item_change_on_sales_order_row_is_blocked(self):
+		from erpnext.selling.doctype.sales_order.sales_order import make_material_request
+		from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
+
+		other_item = create_item("_Test MR Item Swap").name
+		so = make_sales_order()
+		mr = make_material_request(so.name)
+		mr.material_request_type = "Purchase"
+		# swapping the fetched item would leave a stale link to the SO row
+		mr.items[0].item_code = other_item
+		self.assertRaises(frappe.ValidationError, mr.insert)
+
+	def test_pending_qty_in_pick_list(self):
+		"""Test for pick list mapped doc qty from partially received Material Request Transfer"""
+		import json
+
+		from erpnext.stock.doctype.pick_list.pick_list import create_stock_entry
+		from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
+
+		new_item = create_item("_Test Pick List Item", is_stock_item=1)
+		item_code = new_item.name
+
+		make_stock_entry(
+			item_code=item_code,
+			target="_Test Warehouse - _TC",
+			qty=10,
+			do_not_save=False,
+			do_not_submit=False,
+		)
+
+		mr = make_material_request(item_code=item_code, material_request_type="Material Transfer")
+		pl = create_pick_list(mr.name)
+		pl.save()
+		pl.locations[0].qty = 5
+		pl.locations[0].stock_qty = 5
+		pl.submit()
+
+		to_warehouse = create_warehouse("_Test Warehouse - _TC")
+
+		se_data = create_stock_entry(json.dumps(pl.as_dict()))
+		se = frappe.get_doc(se_data)
+		se.items[0].t_warehouse = to_warehouse
+		se.save()
+		se.submit()
+
+		pl.load_from_db()
+		self.assertEqual(pl.locations[0].picked_qty, se.items[0].qty)
+
+		mr.load_from_db()
+		self.assertEqual(mr.status, "Partially Received")
+
+		pl_for_pending = create_pick_list(mr.name)
+		self.assertEqual(pl_for_pending.locations[0].qty, 5)
+
+	def test_mr_status_with_partial_and_excess_end_transit(self):
+		material_request = make_material_request(
+			material_request_type="Material Transfer",
+			item_code="_Test Item Home Desktop 100",
+		)
+
+		in_transit_wh = get_in_transit_warehouse(material_request.company)
+
+		# Make sure stock is available in source warehouse
+		self._insert_stock_entry(20.0, 20.0)
+
+		# Stock Entry (Transfer to In-Transit)
+		stock_entry_1 = make_in_transit_stock_entry(material_request.name, in_transit_wh)
+		stock_entry_1.items[0].update(
+			{
+				"qty": 5,
+				"s_warehouse": "_Test Warehouse 1 - _TC",
+			}
+		)
+		stock_entry_1.save().submit()
+
+		stock_entry_2 = make_in_transit_stock_entry(material_request.name, in_transit_wh)
+		stock_entry_2.items[0].update(
+			{
+				"qty": 5,
+				"s_warehouse": "_Test Warehouse 1 - _TC",
+			}
+		)
+		stock_entry_2.save().submit()
+
+		end_transit_1 = make_stock_in_entry(stock_entry_1.name)
+		end_transit_1.save().submit()
+
+		# Material Request Transfer Status should still be In Transit
+		material_request.load_from_db()
+		self.assertEqual(material_request.transfer_status, "In Transit")
+
+		end_transit_2 = make_stock_in_entry(stock_entry_2.name)
+		end_transit_2.items[0].update({"qty": 6})  # More than transferred
+		end_transit_2.save()
+
+		self.assertRaises(frappe.ValidationError, end_transit_2.submit)
+
+	def test_make_stock_entry_material_issue_warehouse_mapping(self):
+		"""Test to ensure while making stock entry from material request of type Material Issue, warehouse is mapped correctly"""
+		mr = make_material_request(material_request_type="Material Issue", do_not_submit=True)
+		mr.set_warehouse = "_Test Warehouse - _TC"
+		mr.save()
+		mr.submit()
+
+		se = make_stock_entry(mr.name)
+		self.assertEqual(se.from_warehouse, "_Test Warehouse - _TC")
+		self.assertIsNone(se.to_warehouse)
+		se.save()
+		se.submit()
+
+	def test_mr_status_for_mixed_direct_and_transit_transfer(self):
+		material_request = make_material_request(
+			material_request_type="Material Transfer",
+			item_code="_Test Item Home Desktop 100",
+			qty=5,
+		)
+
+		in_transit_wh = get_in_transit_warehouse(material_request.company)
+
+		# Make stock available
+		self._insert_stock_entry(20.0, 20.0)
+
+		# Direct Transfer for 3 Qty
+		direct_transfer = make_stock_entry(material_request.name)
+		direct_transfer.items[0].update(
+			{
+				"qty": 3,
+				"transfer_qty": 3,
+				"s_warehouse": "_Test Warehouse 1 - _TC",
+			}
+		)
+		direct_transfer.save()
+		direct_transfer.submit()
+
+		# In Transit Transfer for remaining 2 Qty
+		transit_transfer = make_in_transit_stock_entry(material_request.name, in_transit_wh)
+		transit_transfer.items[0].update(
+			{
+				"qty": 2,
+				"s_warehouse": "_Test Warehouse 1 - _TC",
+			}
+		)
+		transit_transfer.save()
+		transit_transfer.submit()
+
+		# Complete End Transit
+		end_transit = make_stock_in_entry(transit_transfer.name)
+		end_transit.save()
+		end_transit.submit()
+
+		material_request.reload()
+
+		self.assertEqual(material_request.per_ordered, 100)
+		self.assertEqual(material_request.status, "Transferred")
+		self.assertEqual(material_request.transfer_status, "Completed")
+
 
 def get_in_transit_warehouse(company):
 	if not frappe.db.exists("Warehouse Type", "Transit"):
@@ -900,7 +1130,8 @@ def make_material_request(**args):
 	mr = frappe.new_doc("Material Request")
 	mr.material_request_type = args.material_request_type or "Purchase"
 	mr.company = args.company or "_Test Company"
-	mr.customer = args.customer or "_Test Customer"
+	if mr.material_request_type == "Customer Provided":
+		mr.customer = args.customer or "_Test Customer"
 	mr.append(
 		"items",
 		{
@@ -909,6 +1140,7 @@ def make_material_request(**args):
 			"uom": args.uom or "_Test UOM",
 			"conversion_factor": args.conversion_factor or 1,
 			"schedule_date": args.schedule_date or today(),
+			"from_warehouse": args.from_warehouse,
 			"warehouse": args.warehouse or "_Test Warehouse - _TC",
 			"cost_center": args.cost_center or "_Test Cost Center - _TC",
 		},

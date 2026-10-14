@@ -103,6 +103,7 @@
   "total_monthly_sales",
   "column_break_goals",
   "default_selling_terms",
+  "default_sales_contact",
   "default_warehouse_for_sales_return",
   "credit_limit",
   "transactions_annual_history",
@@ -329,33 +330,48 @@
    "options": "Account"
   },
   {
+   "depends_on": "eval:!doc.__islocal",
    "fieldname": "round_off_account",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "Round Off Account",
+   "no_copy": 1,
    "options": "Account"
   },
   {
+   "depends_on": "eval:!doc.__islocal",
    "fieldname": "round_off_cost_center",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "Round Off Cost Center",
+   "no_copy": 1,
    "options": "Cost Center"
   },
   {
+   "depends_on": "eval:!doc.__islocal",
    "fieldname": "write_off_account",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "Write Off Account",
+   "no_copy": 1,
    "options": "Account"
   },
   {
+   "depends_on": "eval:!doc.__islocal",
    "fieldname": "exchange_gain_loss_account",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "Exchange Gain / Loss Account",
+   "no_copy": 1,
    "options": "Account"
   },
   {
+   "depends_on": "eval:!doc.__islocal",
    "fieldname": "unrealized_exchange_gain_loss_account",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "Unrealized Exchange Gain/Loss Account",
+   "no_copy": 1,
    "options": "Account"
   },
   {
@@ -481,6 +497,7 @@
    "options": "Account"
   },
   {
+   "depends_on": "eval:!doc.__islocal",
    "fieldname": "expenses_included_in_valuation",
    "fieldtype": "Link",
    "ignore_user_permissions": 1,
@@ -489,15 +506,19 @@
    "options": "Account"
   },
   {
+   "depends_on": "eval:!doc.__islocal",
    "fieldname": "accumulated_depreciation_account",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "Accumulated Depreciation Account",
    "no_copy": 1,
    "options": "Account"
   },
   {
+   "depends_on": "eval:!doc.__islocal",
    "fieldname": "depreciation_expense_account",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "Depreciation Expense Account",
    "no_copy": 1,
    "options": "Account"
@@ -518,29 +539,39 @@
    "fieldtype": "Column Break"
   },
   {
+   "depends_on": "eval:!doc.__islocal",
    "fieldname": "disposal_account",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "Gain/Loss Account on Asset Disposal",
    "no_copy": 1,
    "options": "Account"
   },
   {
+   "depends_on": "eval:!doc.__islocal",
    "fieldname": "depreciation_cost_center",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "Asset Depreciation Cost Center",
    "no_copy": 1,
    "options": "Cost Center"
   },
   {
+   "depends_on": "eval:!doc.__islocal",
    "fieldname": "capital_work_in_progress_account",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "Capital Work In Progress Account",
+   "no_copy": 1,
    "options": "Account"
   },
   {
+   "depends_on": "eval:!doc.__islocal",
    "fieldname": "asset_received_but_not_billed",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "Asset Received But Not Billed",
+   "no_copy": 1,
    "options": "Account"
   },
   {
@@ -672,15 +703,21 @@
    "options": "Warehouse"
   },
   {
+   "depends_on": "eval:!doc.__islocal",
    "fieldname": "unrealized_profit_loss_account",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "Unrealized Profit / Loss Account",
+   "no_copy": 1,
    "options": "Account"
   },
   {
+   "depends_on": "eval:!doc.__islocal",
    "fieldname": "default_discount_account",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "Default Payment Discount Account",
+   "no_copy": 1,
    "options": "Account"
   },
   {
@@ -722,8 +759,10 @@
    "documentation_url": "https://docs.erpnext.com/docs/user/manual/en/advance-in-separate-party-account",
    "fieldname": "default_advance_received_account",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "Default Advance Received Account",
    "mandatory_depends_on": "book_advance_payments_as_liability",
+   "no_copy": 1,
    "options": "Account"
   },
   {
@@ -732,8 +771,10 @@
    "documentation_url": "https://docs.erpnext.com/docs/user/manual/en/advance-in-separate-party-account",
    "fieldname": "default_advance_paid_account",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "Default Advance Paid Account",
    "mandatory_depends_on": "book_advance_payments_as_liability",
+   "no_copy": 1,
    "options": "Account"
   },
   {
@@ -766,6 +807,7 @@
   },
   {
    "default": "0",
+   "description": "Upon enabling this, the JV will be submitted for a different exchange rate.",
    "fieldname": "submit_err_jv",
    "fieldtype": "Check",
    "label": "Submit ERR Journals?"
@@ -812,9 +854,12 @@
    "options": "Account"
   },
   {
+   "depends_on": "eval:!doc.__islocal",
    "fieldname": "round_off_for_opening",
    "fieldtype": "Link",
+   "ignore_user_permissions": 1,
    "label": "Round Off for Opening",
+   "no_copy": 1,
    "options": "Account"
   },
   {
@@ -850,6 +895,12 @@
    "fieldtype": "Select",
    "label": "Reconciliation Takes Effect On",
    "options": "Advance Payment Date\nOldest Of Invoice Or Advance\nReconciliation Date"
+  },
+  {
+   "fieldname": "default_sales_contact",
+   "fieldtype": "Link",
+   "label": "Default Sales Contact",
+   "options": "Contact"
   }
  ],
  "icon": "fa fa-building",
@@ -857,7 +908,7 @@
  "image_field": "company_logo",
  "is_tree": 1,
  "links": [],
- "modified": "2025-01-09 20:12:25.471544",
+ "modified": "2026-09-22 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Setup",
  "name": "Company",
@@ -885,6 +936,10 @@
   {
    "read": 1,
    "role": "Employee"
+  },
+  {
+   "read": 1,
+   "role": "Sales Manager"
   },
   {
    "read": 1,
@@ -917,8 +972,13 @@
   {
    "role": "Auditor",
    "select": 1
+  },
+  {
+   "role": "Desk User",
+   "select": 1
   }
  ],
+ "row_format": "Dynamic",
  "show_name_in_global_search": 1,
  "sort_field": "modified",
  "sort_order": "ASC",

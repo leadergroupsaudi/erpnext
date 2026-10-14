@@ -16,13 +16,15 @@ erpnext.accounts.taxes = {
 					}
 				});
 			},
-			onload: function(frm) {
-				if(frm.get_field("taxes")) {
-					frm.set_query("account_head", "taxes", function(doc) {
-						if(frm.cscript.tax_table == "Sales Taxes and Charges") {
-							var account_type = ["Tax", "Chargeable", "Expense Account"];
+			onload: function (frm) {
+				if (frm.get_field("taxes")) {
+					frm.set_query("account_head", "taxes", function (doc) {
+						let account_type = ["Tax", "Chargeable"];
+
+						if (frm.cscript.tax_table == "Sales Taxes and Charges") {
+							account_type.push("Expense Account");
 						} else {
-							var account_type = ["Tax", "Chargeable", "Income Account", "Expenses Included In Valuation"];
+							account_type.push("Income Account", "Expenses Included In Valuation");
 						}
 
 						return {
@@ -237,10 +239,10 @@ erpnext.accounts.pos = {
 		frappe.ui.form.on(doctype, {
 			mode_of_payment: function(frm, cdt, cdn) {
 				var d = locals[cdt][cdn];
-				get_payment_mode_account(frm, d.mode_of_payment, function(account){
-					frappe.model.set_value(cdt, cdn, 'account', account)
-				})
-			}
+				erpnext.accounts.pos.get_payment_mode_account(frm, d.mode_of_payment, function (account) {
+					frappe.model.set_value(cdt, cdn, "account", account);
+				});
+			},
 		});
 	},
 

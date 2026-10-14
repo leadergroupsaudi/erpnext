@@ -32,6 +32,7 @@ class ProductBundle(Document):
 	def validate(self):
 		self.validate_main_item()
 		self.validate_child_items()
+		self.validate_child_items_qty_non_zero()
 		from erpnext.utilities.transaction_base import validate_uom_is_integer
 
 		validate_uom_is_integer(self, "uom", "qty")
@@ -88,6 +89,15 @@ class ProductBundle(Document):
 					).format(item.idx, frappe.bold(item.item_code))
 				)
 
+	def validate_child_items_qty_non_zero(self):
+		for item in self.items:
+			if item.qty <= 0:
+				frappe.throw(
+					_(
+						"Row #{0}: Quantity cannot be a non-positive number. Please increase the quantity or remove the Item {1}"
+					).format(item.idx, frappe.bold(item.item_code))
+				)
+
 
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
@@ -100,19 +110,19 @@ def get_new_item_code(doctype, txt, searchfield, start, page_len, filters):
 	searchfield = searchfield.split(",")
 	searchfield.append("name")
 
-	item = frappe.qb.DocType("Item")
-	query = (
-		frappe.qb.from_(item)
-		.select(item.name, item.item_name)
-		.where((item.is_stock_item == 0) & (item.is_fixed_asset == 0))
-		.limit(page_len)
-		.offset(start)
-	)
-
-	if searchfield:
-		query = query.where(Criterion.any([item[fieldname].like(f"%{txt}%") for fieldname in searchfield]))
+	item_filters = [["is_stock_item", "=", 0], ["is_fixed_asset", "=", 0]]
 
 	if product_bundles:
-		query = query.where(item.name.notin(product_bundles))
+		item_filters.append(["name", "not in", product_bundles])
 
-	return query.run()
+	# get_list applies Item's permission conditions and User Permissions, as item_query() does
+	return frappe.get_list(
+		"Item",
+		filters=item_filters,
+		or_filters=[[fieldname, "like", f"%{txt}%"] for fieldname in searchfield] if searchfield else None,
+		fields=["name", "item_name"],
+		order_by="",  # the query this replaced had no ORDER BY; suppress the injected default
+		limit_start=start,
+		limit_page_length=page_len,
+		as_list=True,
+	)

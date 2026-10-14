@@ -37,6 +37,13 @@ frappe.ui.form.on("Company", {
 			return { filters: { selling: 1 } };
 		});
 
+		frm.set_query("default_sales_contact", function (doc) {
+			return {
+				query: "frappe.contacts.doctype.contact.contact.contact_query",
+				filters: { link_doctype: "Company", link_name: doc.name },
+			};
+		});
+
 		frm.set_query("default_buying_terms", function () {
 			return { filters: { buying: 1 } };
 		});
@@ -47,6 +54,15 @@ frappe.ui.form.on("Company", {
 					warehouse_type: "Transit",
 					is_group: 0,
 					company: frm.doc.company_name,
+				},
+			};
+		});
+
+		frm.set_query("default_warehouse_for_sales_return", function () {
+			return {
+				filters: {
+					company: frm.doc.name,
+					is_group: 0,
 				},
 			};
 		});
@@ -191,7 +207,8 @@ frappe.ui.form.on("Company", {
 								label: __("Please enter the company name to confirm"),
 								reqd: 1,
 								description: __(
-									"Please make sure you really want to delete all the transactions for this company. Your master data will remain as it is. This action cannot be undone."
+									"Please make sure you really want to delete all the transactions for {0}. Your master data will remain as it is. This action cannot be undone.",
+									[frappe.utils.escape_html(frm.doc.name).bold()]
 								),
 							},
 							function (data) {
@@ -211,7 +228,9 @@ frappe.ui.form.on("Company", {
 									},
 								});
 							},
-							__("Delete all the Transactions for this Company"),
+							__("Delete all the Transactions for {0}", [
+								frappe.utils.escape_html(frm.doc.name).bold(),
+							]),
 							__("Delete")
 						);
 						d.get_primary_btn().addClass("btn-danger");
